@@ -1,0 +1,10 @@
+[
+  {
+    "kind": "gpu_layers_autofit_skipped",
+    "message": "I tried to auto-fit GPU params to available VRAM, but you already set n_gpu_layers explicitly, so I skipped the auto-fit step.",
+    "match_all": [
+      "failed to fit params to free device memory",
+      "n_gpu_layers already set by user"
+    ]
+  }
+]
