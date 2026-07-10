@@ -1,113 +1,296 @@
 using System.Collections.ObjectModel;
-using System.Diagnostics;
-using System.Text;
+using System.Globalization;
 using Terminal.Gui;
 using Terminal.Gui.App;
-using Terminal.Gui.Input;
 using Terminal.Gui.Drivers;
+using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
 var app = Application.Create().Init();
 var cfg = AppConfig.Load();
-if (cfg.IsFirstRun && !RunFirstRunWizard(app, cfg))
-    return;
-var profiles = Profile.LoadAll(cfg.ProfilesDir);
+if (cfg.IsFirstRun && !RunFirstRunWizard(app, cfg)) return;
+
+var store = new ProfileStore(cfg.ProfilesDir);
+var load = store.LoadAll();
+var profiles = load.Profiles;
 var selected = 0;
 var runner = new ServerRunner();
-var lines = new ObservableCollection<string>();
-var profileItems = new ObservableCollection<string>(profiles.Count == 0
-    ? ["(no profiles found)"]
-    : profiles.Select(p => p.Name).ToList());
+var runningProfile = "";
+var logLines = new List<string>();
+var profileItems = new ObservableCollection<string>();
+var closing = false;
 
-var win = new Window { Title = "lltop", X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-var profileList = new ListView { X = 0, Y = 1, Width = Dim.Percent(35), Height = Dim.Fill(2) };
-profileList.SetSource(profileItems);
-var logView = new Label { X = Pos.Right(profileList), Y = 1, Width = Dim.Fill(), Height = Dim.Fill(2), Text = "[Logs]\n\nWaiting for server..." };
-var status = new Label { X = 0, Y = Pos.Bottom(profileList), Width = Dim.Fill(), Text = "Loading..." };
-var help = new Label { X = 0, Y = Pos.Bottom(status), Width = Dim.Fill(), Text = "↑/↓ Select  Enter Launch  s Stop  k Kill  r Restart  q Quit" };
-win.Add(profileList, logView, status, help);
+var win = new Window { Title = " lltop · llama.cpp control center ", X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+var banner = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Text = "LLAMA SERVER  •  profiles, launches, and live output" };
+var profileFrame = new FrameView { Title = " Profiles ", X = 0, Y = 2, Width = Dim.Percent(34), Height = Dim.Fill(11) };
+var logFrame = new FrameView { Title = " Live log ", X = Pos.Right(profileFrame), Y = 2, Width = Dim.Fill(), Height = Dim.Fill(11) };
+var profileList = new ListView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+#pragma warning disable CS0618 // Terminal.Gui 2.4 ships TextView as its built-in scrollable read-only text control.
+var logView = new TextView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), ReadOnly = true, WordWrap = false, Text = "Waiting for a server launch…" };
+#pragma warning restore CS0618
+profileFrame.Add(profileList); logFrame.Add(logView);
+var statusFrame = new FrameView { Title = " Selected profile / server ", X = 0, Y = Pos.Bottom(profileFrame), Width = Dim.Fill(), Height = 8 };
+var status = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(), Text = "Loading…" };
+statusFrame.Add(status);
+var help = new Label { X = 1, Y = Pos.Bottom(statusFrame), Width = Dim.Fill(2), Height = 3,
+    Text = "Enter start   s stop   K kill   r restart   n new   e edit   d duplicate   x delete\nF5 reload     v command preview     q quit" };
+win.Add(banner, profileFrame, logFrame, statusFrame, help);
+
+void RefreshProfileItems(string? selectName = null)
+{
+    profileItems.Clear();
+    if (profiles.Count == 0) profileItems.Add("  No profiles yet — press n to create one");
+    else foreach (var p in profiles)
+    {
+        var marker = p.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase)
+            ? runner.State == RunnerState.Running ? "●" : "◐" : "○";
+        var model = string.IsNullOrWhiteSpace(p.Model) ? "model not set" : Path.GetFileName(p.Model);
+        profileItems.Add($"{marker} {p.Name}  ·  {model}");
+    }
+    profileList.SetSource(profileItems);
+    if (profiles.Count == 0) { selected = 0; profileList.SelectedItem = 0; }
+    else
+    {
+        var match = selectName is null ? -1 : profiles.FindIndex(p => p.Name.Equals(selectName, StringComparison.OrdinalIgnoreCase));
+        selected = Math.Clamp(match >= 0 ? match : selected, 0, profiles.Count - 1);
+        profileList.SelectedItem = selected;
+    }
+}
+
+Profile? SelectedProfile() => profiles.Count == 0 ? null : profiles[Math.Clamp(selected, 0, profiles.Count - 1)];
 
 void UpdateStatus(string message = "")
 {
-    var profile = profiles.Count > 0 ? profiles[Math.Clamp(selected, 0, profiles.Count - 1)] : null;
-    var state = runner.Status;
-    var detail = profile is null ? "No profiles" : $"{profile.Name}  {profile.Model}";
-    status.Text = $"{state}  {detail}" + (string.IsNullOrWhiteSpace(message) ? "" : $"  |  {message}");
+    var p = SelectedProfile();
+    var state = runner.State.ToString().ToUpperInvariant();
+    var pid = runner.ProcessId is int id ? $"  PID {id}" : "";
+    var uptime = runner.StartedAt is { } started && runner.IsActive ? $"  Uptime {(DateTimeOffset.Now - started):hh\\:mm\\:ss}" : "";
+    if (p is null)
+    {
+        status.Text = $"STATE    {state}{pid}\n\nNo profiles found in {cfg.ProfilesDir}\n{message}";
+        return;
+    }
+    var model = string.IsNullOrWhiteSpace(p.Model) ? "not configured" : p.Model;
+    var description = string.IsNullOrWhiteSpace(p.Description) ? "—" : p.Description;
+    status.Text = $"STATE    {state}{pid}{uptime}     PROFILE  {p.Name}     BIND  {p.Host}:{p.Port}\n" +
+                  $"MODEL    {model}\n" +
+                  $"DETAIL   ctx {p.Ctx:N0}  gpu layers {p.Ngl}  parallel {p.Parallel}  flash-attn {p.FlashAttn}\n" +
+                  $"ABOUT    {description}" + (string.IsNullOrWhiteSpace(message) ? "" : $"\nINFO     {message}");
 }
 
 void RefreshLogs()
 {
-    logView.Text = string.Join(Environment.NewLine, lines);
-    UpdateStatus();
+    logView.Text = logLines.Count == 0 ? "Waiting for server output…" : string.Join('\n', logLines);
+    logView.MoveEnd();
+}
+
+void ReloadProfiles(string? selectName = null, string message = "Profiles reloaded.")
+{
+    var result = store.LoadAll();
+    profiles = result.Profiles;
+    RefreshProfileItems(selectName);
+    var suffix = result.Errors.Count == 0 ? message : $"{message}  Skipped: {string.Join(" | ", result.Errors)}";
+    UpdateStatus(suffix);
 }
 
 async Task Launch(bool restart = false)
 {
-    if (profiles.Count == 0) { UpdateStatus("No profile to launch"); return; }
-    if (runner.IsRunning)
-    {
-        if (!restart) { UpdateStatus("Already running"); return; }
-        await runner.StopAsync();
-    }
-    lines.Clear();
-    RefreshLogs();
-    var profile = profiles[selected];
+    var profile = SelectedProfile();
+    if (profile is null) { UpdateStatus("Create a profile first (n)."); return; }
     try
     {
-        await runner.StartAsync(cfg, profile, line =>
+        if (runner.IsActive)
         {
-            app.Invoke(() => { lines.Add(line); while (lines.Count > 500) lines.RemoveAt(0); RefreshLogs(); });
-        });
-        UpdateStatus("Launched");
+            if (!restart) { UpdateStatus("A server is already active. Use r to restart it."); return; }
+            UpdateStatus("Stopping the current server for restart…");
+            await runner.StopAsync();
+        }
+        logLines.Clear(); RefreshLogs();
+        runningProfile = profile.Name;
+        await runner.StartAsync(cfg, profile);
+        RefreshProfileItems(profile.Name);
+        UpdateStatus($"Started successfully. Log: {runner.LogPath}");
     }
+    catch (Exception ex)
+    {
+        runningProfile = ""; RefreshProfileItems(profile.Name); UpdateStatus(ex.Message);
+    }
+}
+
+async Task Stop(bool force)
+{
+    if (!runner.IsActive) { UpdateStatus("No managed server is running."); return; }
+    UpdateStatus(force ? "Force-stopping the server…" : "Sending interrupt to llama-server…");
+    if (force) await runner.KillAsync(); else await runner.StopAsync();
+}
+
+void NewProfile()
+{
+    var p = Profile.CreateDefault(cfg, store.UniqueName("new-profile"));
+    p.Description = "New llama-server profile";
+    if (!EditProfile(app, p, "Create profile")) return;
+    try { store.Save(p); ReloadProfiles(p.Name, $"Created profile {p.Name}."); }
     catch (Exception ex) { UpdateStatus(ex.Message); }
 }
 
-app.Keyboard.KeyDown += (_, args) =>
+void EditSelected()
 {
-    var key = args;
-    var text = key.AsGrapheme;
-    if (key.KeyCode == KeyCode.CursorUp) { selected = Math.Max(0, selected - 1); profileList.SelectedItem = selected; UpdateStatus(); key.Handled = true; }
-    else if (key.KeyCode == KeyCode.CursorDown) { selected = Math.Min(Math.Max(0, profiles.Count - 1), selected + 1); profileList.SelectedItem = selected; UpdateStatus(); key.Handled = true; }
-    else if (key.KeyCode == KeyCode.Enter) { _ = Launch(); key.Handled = true; }
-    else if (text.Equals("s", StringComparison.OrdinalIgnoreCase)) { _ = runner.StopAsync(); UpdateStatus("Stopping"); key.Handled = true; }
-    else if (text.Equals("k", StringComparison.OrdinalIgnoreCase)) { _ = runner.KillAsync(); UpdateStatus("Killed"); key.Handled = true; }
-    else if (text.Equals("r", StringComparison.OrdinalIgnoreCase)) { _ = Launch(true); key.Handled = true; }
-    else if (text.Equals("q", StringComparison.OrdinalIgnoreCase) || key.KeyCode == KeyCode.Esc) { _ = runner.StopAsync(); app.RequestStop(); key.Handled = true; }
+    var p = SelectedProfile(); if (p is null) { UpdateStatus("No profile selected."); return; }
+    var edited = p.Copy(p.Name);
+    if (!EditProfile(app, edited, "Edit profile")) return;
+    try { store.Save(edited); ReloadProfiles(edited.Name, $"Saved profile {edited.Name}."); }
+    catch (Exception ex) { UpdateStatus(ex.Message); }
+}
+
+void DuplicateSelected()
+{
+    var source = SelectedProfile(); if (source is null) { UpdateStatus("No profile selected."); return; }
+    var copy = source.Copy(store.UniqueName(source.Name + "-copy"));
+    try { store.Save(copy); ReloadProfiles(copy.Name, $"Duplicated as {copy.Name}."); }
+    catch (Exception ex) { UpdateStatus(ex.Message); }
+}
+
+void DeleteSelected()
+{
+    var p = SelectedProfile(); if (p is null) { UpdateStatus("No profile selected."); return; }
+    if (p.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase) && runner.IsActive) { UpdateStatus("Stop this profile before deleting it."); return; }
+    var answer = MessageBox.Query(app, "Delete profile", $"Delete '{p.Name}'?\n\n{p.SourcePath}", "Cancel", "Delete");
+    if (answer != 1) return;
+    try { store.Delete(p); ReloadProfiles(message: $"Deleted profile {p.Name}."); }
+    catch (Exception ex) { UpdateStatus(ex.Message); }
+}
+
+async Task Quit()
+{
+    if (closing) return;
+    if (runner.IsActive)
+    {
+        var answer = MessageBox.Query(app, "Server is running", "Stop llama-server and quit lltop?", "Cancel", "Stop and quit");
+        if (answer != 1) return;
+    }
+    closing = true;
+    await runner.StopAsync();
+    app.RequestStop();
+}
+
+runner.LineReceived += line => app.Invoke(() =>
+{
+    logLines.Add(line);
+    if (logLines.Count > 500) logLines.RemoveAt(0);
+    RefreshLogs();
+});
+runner.StateChanged += _ => app.Invoke(() => { RefreshProfileItems(runningProfile); UpdateStatus(); });
+runner.Exited += exit => app.Invoke(() =>
+{
+    var name = runningProfile; runningProfile = ""; RefreshProfileItems(name);
+    UpdateStatus(exit.Requested ? $"Server stopped (exit {exit.ExitCode})." : $"Server exited with code {exit.ExitCode}." + (exit.Error is null ? "" : $" {exit.Error}"));
+});
+profileList.ValueChanged += (_, _) =>
+{
+    if (profileList.SelectedItem is int value && profiles.Count > 0) selected = Math.Clamp(value, 0, profiles.Count - 1);
+    UpdateStatus();
 };
 
-UpdateStatus(cfg.LoadMessage);
+app.Keyboard.KeyDown += (_, key) =>
+{
+    var text = key.AsGrapheme;
+    if (key.KeyCode == KeyCode.Enter) { _ = Launch(); key.Handled = true; }
+    else if (text == "s") { _ = Stop(false); key.Handled = true; }
+    else if (text == "K") { _ = Stop(true); key.Handled = true; }
+    else if (text.Equals("r", StringComparison.OrdinalIgnoreCase)) { _ = Launch(true); key.Handled = true; }
+    else if (text.Equals("n", StringComparison.OrdinalIgnoreCase)) { NewProfile(); key.Handled = true; }
+    else if (text.Equals("e", StringComparison.OrdinalIgnoreCase)) { EditSelected(); key.Handled = true; }
+    else if (text.Equals("d", StringComparison.OrdinalIgnoreCase)) { DuplicateSelected(); key.Handled = true; }
+    else if (text.Equals("x", StringComparison.OrdinalIgnoreCase)) { DeleteSelected(); key.Handled = true; }
+    else if (text.Equals("v", StringComparison.OrdinalIgnoreCase))
+    {
+        var p = SelectedProfile();
+        UpdateStatus(p is null ? "No profile selected." : ServerRunner.BuildArguments(p).Aggregate("llama-server", (all, arg) => all + " " + arg));
+        key.Handled = true;
+    }
+    else if (key.KeyCode == KeyCode.F5) { ReloadProfiles(); key.Handled = true; }
+    else if (text.Equals("q", StringComparison.OrdinalIgnoreCase) || key.KeyCode == KeyCode.Esc) { _ = Quit(); key.Handled = true; }
+};
+
+RefreshProfileItems();
+UpdateStatus(load.Errors.Count == 0 ? cfg.LoadMessage : $"Skipped invalid profiles: {string.Join(" | ", load.Errors)}");
 app.Run(win);
 runner.Dispose();
 
-static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
+static bool EditProfile(IApplication app, Profile profile, string title)
 {
-    var wizard = new Window { Title = "lltop first-run setup", Width = 90, Height = 18 };
-    wizard.Add(new Label { X = 2, Y = 1, Text = "Welcome to lltop. Configure llama.cpp before continuing." });
-    wizard.Add(new Label { X = 2, Y = 3, Text = "llama-server binary or app directory:" });
-    var server = new TextField { X = 2, Y = 4, Width = Dim.Fill(4), Text = "~/llama/app" };
-    wizard.Add(server);
-    wizard.Add(new Label { X = 2, Y = 6, Text = "Models directory:" });
-    var models = new TextField { X = 2, Y = 7, Width = Dim.Fill(4), Text = "~/llama/models" };
-    wizard.Add(models);
-    var message = new Label { X = 2, Y = 10, Width = Dim.Fill(4), Height = 2, Text = "Enter paths, then choose Save. Esc cancels setup." };
-    wizard.Add(message);
-    var save = new Button { X = 2, Y = 13, Text = "Save and continue", IsDefault = true };
-    var cancel = new Button { X = Pos.Right(save) + 2, Y = 13, Text = "Cancel" };
-    wizard.Add(save, cancel);
-    var completed = false;
-
+    var dialog = new Window { Title = $" {title} ", Width = 96, Height = 31 };
+    var fields = new Dictionary<string, TextField>();
+    TextField Field(string label, string value, int y, int x = 2, int width = 42)
+    {
+        dialog.Add(new Label { X = x, Y = y, Text = label });
+        var field = new TextField { X = x, Y = y + 1, Width = width, Text = value };
+        dialog.Add(field); fields[label] = field; return field;
+    }
+    string T(string label) => fields[label].Text;
+    var name = Field("Name", profile.Name, 1);
+    Field("Description", profile.Description, 1, 49, 43);
+    Field("Model path", profile.Model, 4, 2, 90);
+    Field("llama-server override (blank = global)", profile.LlamaServer, 7, 2, 90);
+    Field("Host", profile.Host, 10); Field("Port", profile.Port.ToString(), 10, 49);
+    Field("Context", profile.Ctx.ToString(), 13); Field("GPU layers", profile.Ngl.ToString(), 13, 49);
+    Field("Parallel", profile.Parallel.ToString(), 16); Field("Threads (0 = auto)", profile.Threads.ToString(), 16, 49);
+    Field("Flash attention (auto/on/off)", profile.FlashAttn, 19); Field("Alias", profile.Alias, 19, 49);
+    var jinja = new CheckBox { X = 2, Y = 23, Text = "Jinja", Value = profile.Jinja ? CheckState.Checked : CheckState.UnChecked };
+    var metrics = new CheckBox { X = 20, Y = 23, Text = "Metrics", Value = profile.Metrics ? CheckState.Checked : CheckState.UnChecked };
+    var mmap = new CheckBox { X = 40, Y = 23, Text = "Disable mmap", Value = profile.NoMmap ? CheckState.Checked : CheckState.UnChecked };
+    dialog.Add(jinja, metrics, mmap);
+    var message = new Label { X = 2, Y = 25, Width = Dim.Fill(2), Text = "Tab moves between fields. Paths may use ~ and environment variables." };
+    var save = new Button { X = 2, Y = 27, Text = "Save", IsDefault = true };
+    var cancel = new Button { X = Pos.Right(save) + 2, Y = 27, Text = "Cancel" };
+    dialog.Add(message, save, cancel);
+    var accepted = false;
     save.Accepting += (_, _) =>
     {
         try
         {
-            var serverPath = ResolveServerPath(AppConfig.Expand(server.Text));
+            profile.Name = name.Text.Trim(); profile.Description = T("Description").Trim();
+            profile.Model = AppConfig.Expand(T("Model path"));
+            profile.LlamaServer = AppConfig.Expand(T("llama-server override (blank = global)"));
+            profile.Host = T("Host").Trim(); profile.Port = ParseInt(T("Port"), "Port");
+            profile.Ctx = ParseInt(T("Context"), "Context"); profile.Ngl = ParseInt(T("GPU layers"), "GPU layers");
+            profile.Parallel = ParseInt(T("Parallel"), "Parallel"); profile.Threads = ParseInt(T("Threads (0 = auto)"), "Threads");
+            profile.FlashAttn = T("Flash attention (auto/on/off)").Trim().ToLowerInvariant(); profile.Alias = T("Alias").Trim();
+            profile.Jinja = jinja.Value == CheckState.Checked; profile.Metrics = metrics.Value == CheckState.Checked; profile.NoMmap = mmap.Value == CheckState.Checked;
+            profile.Validate(); accepted = true; app.RequestStop();
+        }
+        catch (Exception ex) { message.Text = ex.Message; }
+    };
+    cancel.Accepting += (_, _) => app.RequestStop();
+    app.Run(dialog);
+    return accepted;
+}
+
+static int ParseInt(string value, string name) => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : throw new FormatException($"{name} must be a whole number.");
+
+static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
+{
+    var wizard = new Window { Title = " Welcome to lltop ", Width = 90, Height = 19 };
+    wizard.Add(new Label { X = 2, Y = 1, Text = "Connect lltop to your llama.cpp installation." });
+    wizard.Add(new Label { X = 2, Y = 3, Text = "llama-server binary or app directory" });
+    var server = new TextField { X = 2, Y = 4, Width = Dim.Fill(4), Text = "~/llama/app" };
+    wizard.Add(server, new Label { X = 2, Y = 6, Text = "Models directory" });
+    var models = new TextField { X = 2, Y = 7, Width = Dim.Fill(4), Text = "~/llama/models" };
+    var message = new Label { X = 2, Y = 10, Width = Dim.Fill(4), Height = 2, Text = "Both paths must already exist. Esc cancels setup." };
+    var save = new Button { X = 2, Y = 14, Text = "Save and continue", IsDefault = true };
+    var cancel = new Button { X = Pos.Right(save) + 2, Y = 14, Text = "Cancel" };
+    wizard.Add(models, message, save, cancel);
+    var completed = false;
+    save.Accepting += (_, _) =>
+    {
+        try
+        {
+            var input = AppConfig.Expand(server.Text);
+            var serverPath = File.Exists(input) ? input : Path.Combine(input, OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server");
             var modelsPath = AppConfig.Expand(models.Text);
-            if (string.IsNullOrWhiteSpace(serverPath) || !File.Exists(serverPath)) throw new InvalidOperationException("llama-server executable was not found. Enter its full path or an app directory containing it.");
-            if (string.IsNullOrWhiteSpace(modelsPath)) throw new InvalidOperationException("Models directory is required.");
-            if (!Directory.Exists(modelsPath)) throw new InvalidOperationException("Models directory was not found. Enter an existing directory containing your models.");
-            if (!Directory.EnumerateFileSystemEntries(modelsPath).Any()) throw new InvalidOperationException("Models directory is empty. Enter a directory containing your models.");
+            if (!File.Exists(serverPath)) throw new InvalidOperationException("llama-server was not found at that location.");
+            if (!Directory.Exists(modelsPath)) throw new InvalidOperationException("Models directory was not found.");
             cfg.LlamaServer = serverPath; cfg.ModelsDir = modelsPath; cfg.Save(); completed = true; app.RequestStop();
         }
         catch (Exception ex) { message.Text = ex.Message; }
@@ -115,111 +298,4 @@ static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
     cancel.Accepting += (_, _) => app.RequestStop();
     app.Run(wizard);
     return completed;
-}
-
-static string ResolveServerPath(string path)
-{
-    if (File.Exists(path)) return path;
-    if (!Directory.Exists(path)) return "";
-    foreach (var name in OperatingSystem.IsWindows() ? new[] { "llama-server.exe", "llama-server" } : new[] { "llama-server" })
-    {
-        var candidate = Path.Combine(path, name);
-        if (File.Exists(candidate)) return candidate;
-    }
-    return "";
-}
-
-sealed class AppConfig
-{
-    public string LlamaServer { get; set; } = "";
-    public string ModelsDir { get; set; } = "";
-    public string ProfilesDir { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "lltop", "profiles");
-    public string LogsDir { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "lltop", "logs");
-    public string DefaultHost { get; set; } = "0.0.0.0";
-    public int DefaultPort { get; set; } = 8080;
-    public string LoadMessage { get; private set; } = "";
-    public bool IsFirstRun { get; private set; }
-
-    public static AppConfig Load()
-    {
-        var c = new AppConfig();
-        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "lltop");
-        var path = Path.Combine(root, "config.toml");
-        c.IsFirstRun = !File.Exists(path);
-        try
-        {
-            if (File.Exists(path)) Toml.ReadInto(path, c);
-            c.ProfilesDir = Expand(c.ProfilesDir); c.LogsDir = Expand(c.LogsDir); c.LlamaServer = Expand(c.LlamaServer); c.ModelsDir = Expand(c.ModelsDir);
-            Directory.CreateDirectory(c.ProfilesDir); Directory.CreateDirectory(c.LogsDir);
-            c.LoadMessage = File.Exists(path) ? $"config: {path}" : $"config missing; using defaults ({path})";
-        }
-        catch (Exception ex) { c.LoadMessage = $"config error: {ex.Message}"; }
-        return c;
-    }
-    public static string Expand(string value) => string.IsNullOrWhiteSpace(value) ? value : Environment.ExpandEnvironmentVariables(value.Replace("~", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), StringComparison.Ordinal));
-    public static string ConfigPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "lltop", "config.toml");
-    public void Save()
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
-        File.WriteAllText(ConfigPath, $"llama_server = {Toml.Quote(LlamaServer)}{Environment.NewLine}models_dir = {Toml.Quote(ModelsDir)}{Environment.NewLine}profiles_dir = {Toml.Quote(ProfilesDir)}{Environment.NewLine}logs_dir = {Toml.Quote(LogsDir)}{Environment.NewLine}default_host = {Toml.Quote(DefaultHost)}{Environment.NewLine}default_port = {DefaultPort}{Environment.NewLine}");
-        IsFirstRun = false;
-    }
-}
-
-sealed class Profile
-{
-    public string Name { get; set; } = ""; public string Description { get; set; } = ""; public string LlamaServer { get; set; } = ""; public string Model { get; set; } = "";
-    public string Host { get; set; } = "0.0.0.0"; public int Port { get; set; } = 8080; public int Ctx { get; set; } = 65536; public int Ngl { get; set; } = 99;
-    public string CacheK { get; set; } = "q4_0"; public string CacheV { get; set; } = "q4_0"; public double Temp { get; set; } = .1; public double TopP { get; set; } = .95; public int TopK { get; set; } = 40; public double MinP { get; set; } = .05;
-    public int Batch { get; set; } = 512; public int UBatch { get; set; } = 256; public int Parallel { get; set; } = 1; public int Threads { get; set; } = 0; public string FlashAttn { get; set; } = "auto"; public bool Jinja { get; set; } = true; public bool Metrics { get; set; } = true; public bool NoMmap { get; set; } = true; public string ChatTemplate { get; set; } = "chatml"; public string Reasoning { get; set; } = "auto"; public int ReasoningBudget { get; set; } = -1; public List<string> ExtraArgs { get; set; } = [];
-    public static List<Profile> LoadAll(string dir)
-    {
-        var result = new List<Profile>();
-        if (!Directory.Exists(dir)) return result;
-        foreach (var path in Directory.EnumerateFiles(dir, "*.toml").OrderBy(x => x))
-        {
-            try { var p = new Profile(); Toml.ReadInto(path, p); if (string.IsNullOrWhiteSpace(p.Name)) p.Name = Path.GetFileNameWithoutExtension(path); p.Model = AppConfig.Expand(p.Model); p.LlamaServer = AppConfig.Expand(p.LlamaServer); result.Add(p); } catch { }
-        }
-        return result.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
-    }
-}
-
-static class Toml
-{
-    public static void ReadInto<T>(string path, T target)
-    {
-        foreach (var raw in File.ReadLines(path))
-        {
-            var line = raw.Split('#', 2)[0].Trim(); if (line.Length == 0 || !line.Contains('=')) continue;
-            var pair = line.Split('=', 2); var key = pair[0].Trim().Replace("-", "_"); var value = pair[1].Trim();
-            var prop = typeof(T).GetProperties().FirstOrDefault(p => string.Equals(p.Name, key, StringComparison.OrdinalIgnoreCase)); if (prop is null) continue;
-            try { if (prop.PropertyType == typeof(string)) prop.SetValue(target, Unquote(value)); else if (prop.PropertyType == typeof(int)) prop.SetValue(target, int.Parse(value)); else if (prop.PropertyType == typeof(double)) prop.SetValue(target, double.Parse(value, System.Globalization.CultureInfo.InvariantCulture)); else if (prop.PropertyType == typeof(bool)) prop.SetValue(target, bool.Parse(value)); else if (prop.PropertyType == typeof(List<string>)) prop.SetValue(target, value.Trim('[', ']').Split(',', StringSplitOptions.RemoveEmptyEntries).Select(Unquote).ToList()); } catch { }
-        }
-    }
-    static string Unquote(string s) => s.Trim().Trim('"', '\'').Trim();
-    public static string Quote(string value) => $"\"{value.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"";
-}
-
-sealed class ServerRunner : IDisposable
-{
-    Process? process; public string Status { get; private set; } = "stopped"; public bool IsRunning => process is { HasExited: false };
-    public async Task StartAsync(AppConfig cfg, Profile profile, Action<string> onLine)
-    {
-        var executable = string.IsNullOrWhiteSpace(profile.LlamaServer) ? cfg.LlamaServer : profile.LlamaServer;
-        if (string.IsNullOrWhiteSpace(executable)) throw new InvalidOperationException("llama_server path is required");
-        if (!File.Exists(executable)) throw new FileNotFoundException("llama_server not found", executable);
-        if (string.IsNullOrWhiteSpace(profile.Model) || !File.Exists(profile.Model)) throw new FileNotFoundException("model not found", profile.Model);
-        var args = $"-m {Quote(profile.Model)} --host {Quote(profile.Host)} --port {profile.Port} -c {profile.Ctx} -ngl {profile.Ngl} --cache-type-k {profile.CacheK} --cache-type-v {profile.CacheV} --temp {profile.Temp} --top-p {profile.TopP} --top-k {profile.TopK} --min-p {profile.MinP} -b {profile.Batch} -ub {profile.UBatch} --parallel {profile.Parallel} --flash-attn {profile.FlashAttn}";
-        if (profile.Threads > 0) args += $" --threads {profile.Threads}"; if (profile.Jinja) args += " --jinja"; if (profile.Metrics) args += " --metrics"; if (profile.NoMmap) args += " --no-mmap"; if (!string.IsNullOrWhiteSpace(profile.ChatTemplate)) args += $" --chat-template {Quote(profile.ChatTemplate)}"; if (!string.IsNullOrWhiteSpace(profile.Reasoning)) args += $" --reasoning {Quote(profile.Reasoning)} --reasoning-budget {profile.ReasoningBudget}"; args += string.Join(' ', profile.ExtraArgs.Select(Quote));
-        Directory.CreateDirectory(cfg.LogsDir); var log = Path.Combine(cfg.LogsDir, $"{DateTime.Now:yyyy-MM-dd_HHmmss}_{profile.Name}.log");
-        process = new Process { StartInfo = new ProcessStartInfo(executable, args) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true } }; process.Start(); Status = "running";
-        async Task Read(StreamReader reader) { while (await reader.ReadLineAsync() is { } line) { await File.AppendAllTextAsync(log, line + Environment.NewLine); onLine(line); } }
-        _ = Task.WhenAll(Read(process.StandardOutput), Read(process.StandardError)).ContinueWith(_ =>
-        {
-            Status = process.HasExited && process.ExitCode == 0 ? "stopped" : "failed";
-        });
-    }
-    public async Task StopAsync() { if (!IsRunning) return; Status = "stopping"; try { process!.Kill(entireProcessTree: true); await process.WaitForExitAsync(); } catch { } }
-    public Task KillAsync() => StopAsync(); public void Dispose() { if (IsRunning) process!.Kill(true); process?.Dispose(); }
-    static string Quote(string s) => s.Contains(' ') ? $"\"{s.Replace("\"", "\\\"") }\"" : s;
 }

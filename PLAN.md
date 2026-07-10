@@ -51,13 +51,13 @@ implementation is in `go_source`; the .NET implementation is in `lltop`.
 - Display parsed metrics in the status panel.
 - Add parser unit tests using representative llama.cpp log lines.
 
-### Phase 5 — Configuration UX and Full UI
+### Phase 5 — Configuration UX and Full UI (in progress)
 
-- Improve TOML parsing and validation error reporting.
-- Add profile creation, editing, duplication, and deletion.
-- Add restart confirmation and clearer launch error dialogs.
-- Replace the basic log text view with scrolling and auto-scroll controls.
-- Add command preview and clipboard support.
+- Completed structured profile creation, editing, duplication, deletion, and reload.
+- Completed profile validation and visible per-file load errors.
+- Completed a framed dashboard layout, scrollable live log, server PID/uptime, and command preview.
+- Completed argument-safe process launch, graceful Unix stop with timeout escalation, and separate force-kill.
+- Remaining: restart confirmation and clipboard support.
 
 ### Phase 6 — History and Polish
 
