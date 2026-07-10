@@ -10,6 +10,8 @@ using Terminal.Gui.Views;
 
 var app = Application.Create().Init();
 var cfg = AppConfig.Load();
+if (cfg.IsFirstRun && !RunFirstRunWizard(app, cfg))
+    return;
 var profiles = Profile.LoadAll(cfg.ProfilesDir);
 var selected = 0;
 var runner = new ServerRunner();
@@ -79,24 +81,74 @@ UpdateStatus(cfg.LoadMessage);
 app.Run(win);
 runner.Dispose();
 
+static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
+{
+    var wizard = new Window { Title = "lltop first-run setup", Width = 90, Height = 18 };
+    wizard.Add(new Label { X = 2, Y = 1, Text = "Welcome to lltop. Configure llama.cpp before continuing." });
+    wizard.Add(new Label { X = 2, Y = 3, Text = "llama-server binary or app directory:" });
+    var server = new TextField { X = 2, Y = 4, Width = Dim.Fill(4), Text = "~/llama/app" };
+    wizard.Add(server);
+    wizard.Add(new Label { X = 2, Y = 6, Text = "Models directory:" });
+    var models = new TextField { X = 2, Y = 7, Width = Dim.Fill(4), Text = "~/llama/models" };
+    wizard.Add(models);
+    var message = new Label { X = 2, Y = 10, Width = Dim.Fill(4), Height = 2, Text = "Enter paths, then choose Save. Esc cancels setup." };
+    wizard.Add(message);
+    var save = new Button { X = 2, Y = 13, Text = "Save and continue", IsDefault = true };
+    var cancel = new Button { X = Pos.Right(save) + 2, Y = 13, Text = "Cancel" };
+    wizard.Add(save, cancel);
+    var completed = false;
+
+    save.Accepting += (_, _) =>
+    {
+        try
+        {
+            var serverPath = ResolveServerPath(AppConfig.Expand(server.Text));
+            var modelsPath = AppConfig.Expand(models.Text);
+            if (string.IsNullOrWhiteSpace(serverPath) || !File.Exists(serverPath)) throw new InvalidOperationException("llama-server executable was not found. Enter its full path or an app directory containing it.");
+            if (string.IsNullOrWhiteSpace(modelsPath)) throw new InvalidOperationException("Models directory is required.");
+            Directory.CreateDirectory(modelsPath);
+            cfg.LlamaServer = serverPath; cfg.ModelsDir = modelsPath; cfg.Save(); completed = true; app.RequestStop();
+        }
+        catch (Exception ex) { message.Text = ex.Message; }
+    };
+    cancel.Accepting += (_, _) => app.RequestStop();
+    app.Run(wizard);
+    return completed;
+}
+
+static string ResolveServerPath(string path)
+{
+    if (File.Exists(path)) return path;
+    if (!Directory.Exists(path)) return "";
+    foreach (var name in OperatingSystem.IsWindows() ? new[] { "llama-server.exe", "llama-server" } : new[] { "llama-server" })
+    {
+        var candidate = Path.Combine(path, name);
+        if (File.Exists(candidate)) return candidate;
+    }
+    return "";
+}
+
 sealed class AppConfig
 {
     public string LlamaServer { get; set; } = "";
+    public string ModelsDir { get; set; } = "";
     public string ProfilesDir { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "lltop", "profiles");
     public string LogsDir { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "lltop", "logs");
     public string DefaultHost { get; set; } = "0.0.0.0";
     public int DefaultPort { get; set; } = 8080;
     public string LoadMessage { get; private set; } = "";
+    public bool IsFirstRun { get; private set; }
 
     public static AppConfig Load()
     {
         var c = new AppConfig();
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "lltop");
         var path = Path.Combine(root, "config.toml");
+        c.IsFirstRun = !File.Exists(path);
         try
         {
             if (File.Exists(path)) Toml.ReadInto(path, c);
-            c.ProfilesDir = Expand(c.ProfilesDir); c.LogsDir = Expand(c.LogsDir); c.LlamaServer = Expand(c.LlamaServer);
+            c.ProfilesDir = Expand(c.ProfilesDir); c.LogsDir = Expand(c.LogsDir); c.LlamaServer = Expand(c.LlamaServer); c.ModelsDir = Expand(c.ModelsDir);
             Directory.CreateDirectory(c.ProfilesDir); Directory.CreateDirectory(c.LogsDir);
             c.LoadMessage = File.Exists(path) ? $"config: {path}" : $"config missing; using defaults ({path})";
         }
@@ -104,6 +156,13 @@ sealed class AppConfig
         return c;
     }
     public static string Expand(string value) => string.IsNullOrWhiteSpace(value) ? value : Environment.ExpandEnvironmentVariables(value.Replace("~", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), StringComparison.Ordinal));
+    public static string ConfigPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "lltop", "config.toml");
+    public void Save()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
+        File.WriteAllText(ConfigPath, $"llama_server = {Toml.Quote(LlamaServer)}{Environment.NewLine}models_dir = {Toml.Quote(ModelsDir)}{Environment.NewLine}profiles_dir = {Toml.Quote(ProfilesDir)}{Environment.NewLine}logs_dir = {Toml.Quote(LogsDir)}{Environment.NewLine}default_host = {Toml.Quote(DefaultHost)}{Environment.NewLine}default_port = {DefaultPort}{Environment.NewLine}");
+        IsFirstRun = false;
+    }
 }
 
 sealed class Profile
@@ -137,6 +196,7 @@ static class Toml
         }
     }
     static string Unquote(string s) => s.Trim().Trim('"', '\'').Trim();
+    public static string Quote(string value) => $"\"{value.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"";
 }
 
 sealed class ServerRunner : IDisposable

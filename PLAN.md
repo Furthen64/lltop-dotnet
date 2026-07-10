@@ -23,6 +23,10 @@ implementation is in `go_source`; the .NET implementation is in `lltop`.
 - Added default configuration values for profile and log directories.
 - Added environment-variable and `~` path expansion.
 - Added directory creation for profiles and logs.
+- Added first-run setup detection and a guided Terminal.Gui wizard.
+- Added wizard fields for the `llama-server` binary/app directory and models directory.
+- Added suggested defaults of `~/llama/app` and `~/llama/models`.
+- Added validation, path expansion, models-directory creation, and config persistence.
 - Added TOML profile discovery from `*.toml` files.
 - Added profile defaults for the main llama.cpp server options.
 - Added sorting and display of loaded profiles.
@@ -49,7 +53,6 @@ implementation is in `go_source`; the .NET implementation is in `lltop`.
 
 ### Phase 5 — Configuration UX and Full UI
 
-- Add first-run configuration guidance or wizard.
 - Improve TOML parsing and validation error reporting.
 - Add profile creation, editing, duplication, and deletion.
 - Add restart confirmation and clearer launch error dialogs.
