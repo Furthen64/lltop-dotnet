@@ -41,37 +41,50 @@ implementation is in `go_source`; the .NET implementation is in `lltop`.
 - Added a bounded live log view retaining the most recent 500 lines.
 - Added runner status transitions for running, stopping, stopped, and failed states.
 
-## Remaining Work
+## Ported Feature Set
 
 ### Phase 4 — Log Parser and Metrics
 
-- Port the Go parser into a dedicated C# parser model.
-- Parse prompt/eval timing, throughput, progress, memory, GPU, and context data.
-- Detect llama.cpp errors, cancellation, and actionable hints.
-- Display parsed metrics in the status panel.
-- Add parser unit tests using representative llama.cpp log lines.
+- Completed a dedicated C# parser model.
+- Completed prompt/eval timing, throughput, progress, memory, GPU, and context parsing.
+- Completed categorized llama.cpp errors, cancellation, and actionable hints.
+- Completed live metrics and issue display in the status panel.
+- Added parser unit tests using representative llama.cpp log lines.
 
-### Phase 5 — Configuration UX and Full UI (in progress)
+### Phase 5 — Configuration UX and Full UI
 
 - Completed structured profile creation, editing, duplication, deletion, and reload.
 - Completed profile validation and visible per-file load errors.
 - Completed a framed dashboard layout, scrollable live log, server PID/uptime, and command preview.
 - Completed argument-safe process launch, graceful Unix stop with timeout escalation, and separate force-kill.
-- Remaining: restart confirmation and clipboard support.
+- Completed restart/recent-failure confirmation and clipboard support.
+- Completed log autoscroll control, default-profile selection, model sizes, and full profile-field editing.
 
 ### Phase 6 — History and Polish
 
-- Persist run records and profile summaries.
-- Add run history and annotations/notes.
-- Add recent-failure detection and startup-failure handling.
-- Improve process cleanup and graceful signal handling across platforms.
-- Add automated tests for configuration, command construction, runner behavior,
-  and UI-independent application logic.
+- Completed Go-compatible JSON run records and per-profile metric summaries/sparklines.
+- Completed run history and in-app annotations/notes.
+- Completed recent-failure detection and startup-failure confirmation.
+- Added automated tests for parser, history, configuration, command construction,
+  runner behavior, and UI-independent application logic.
+
+### Phase 7 — Existing Server Awareness
+
+- Completed cross-platform external `llama-server` process discovery.
+- Completed external command display and best-effort log discovery/following.
+- Completed managed, external, and idle status reporting.
+
+## Remaining Polish
+
+- Add automated interaction tests for Terminal.Gui dialogs and keyboard workflows.
+- Improve graceful Windows process interruption; Windows currently falls back to process-tree termination.
+- Improve external command-line and redirected-log discovery on Windows where `/proc` metadata is unavailable.
 
 ## Current Verification
 
 The project builds successfully with:
 
 ```text
-dotnet build --no-restore
+dotnet build lltop/lltop.csproj --no-restore
+dotnet test tests/lltop.Tests/lltop.Tests.csproj --no-restore
 ```

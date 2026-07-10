@@ -21,6 +21,7 @@ sealed class ServerRunner : IDisposable
     public DateTimeOffset? StartedAt { get; private set; }
     public string Command { get; private set; } = "";
     public string LogPath { get; private set; } = "";
+    public ServerExit? LastExit { get; private set; }
     public bool IsActive => State is RunnerState.Starting or RunnerState.Running or RunnerState.Stopping;
     public event Action<string>? LineReceived;
     public event Action<RunnerState>? StateChanged;
@@ -35,6 +36,7 @@ sealed class ServerRunner : IDisposable
             profile.Validate(true, cfg);
             SetState(RunnerState.Starting);
             stopRequested = false;
+            LastExit = null;
             var currentGeneration = ++generation;
             var executable = string.IsNullOrWhiteSpace(profile.LlamaServer) ? cfg.LlamaServer : profile.LlamaServer;
             var args = BuildArguments(profile);
@@ -100,7 +102,8 @@ sealed class ServerRunner : IDisposable
             SetState(stopRequested || exitCode == 0 ? RunnerState.Stopped : RunnerState.Failed);
         }
         finally { gate.Release(); }
-        Exited?.Invoke(new(exitCode, stopRequested, error));
+        LastExit = new(exitCode, stopRequested, error);
+        Exited?.Invoke(LastExit);
     }
 
     public async Task StopAsync(TimeSpan? timeout = null)
