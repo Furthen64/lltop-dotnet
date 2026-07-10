@@ -21,7 +21,7 @@ var profileItems = new ObservableCollection<string>(profiles.Count == 0
 var win = new Window { Title = "lltop", X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
 var profileList = new ListView { X = 0, Y = 1, Width = Dim.Percent(35), Height = Dim.Fill(2) };
 profileList.SetSource(profileItems);
-var logView = new TextView { X = Pos.Right(profileList), Y = 1, Width = Dim.Fill(), Height = Dim.Fill(2), ReadOnly = true };
+var logView = new Label { X = Pos.Right(profileList), Y = 1, Width = Dim.Fill(), Height = Dim.Fill(2), Text = "[Logs]\n\nWaiting for server..." };
 var status = new Label { X = 0, Y = Pos.Bottom(profileList), Width = Dim.Fill(), Text = "Loading..." };
 var help = new Label { X = 0, Y = Pos.Bottom(status), Width = Dim.Fill(), Text = "↑/↓ Select  Enter Launch  s Stop  k Kill  r Restart  q Quit" };
 win.Add(profileList, logView, status, help);
@@ -37,7 +37,6 @@ void UpdateStatus(string message = "")
 void RefreshLogs()
 {
     logView.Text = string.Join(Environment.NewLine, lines);
-    logView.MoveEnd();
     UpdateStatus();
 }
 
@@ -56,7 +55,7 @@ async Task Launch(bool restart = false)
     {
         await runner.StartAsync(cfg, profile, line =>
         {
-            Application.Invoke(() => { lines.Add(line); while (lines.Count > 500) lines.RemoveAt(0); RefreshLogs(); });
+            app.Invoke(() => { lines.Add(line); while (lines.Count > 500) lines.RemoveAt(0); RefreshLogs(); });
         });
         UpdateStatus("Launched");
     }
@@ -73,7 +72,7 @@ app.Keyboard.KeyDown += (_, args) =>
     else if (text.Equals("s", StringComparison.OrdinalIgnoreCase)) { _ = runner.StopAsync(); UpdateStatus("Stopping"); key.Handled = true; }
     else if (text.Equals("k", StringComparison.OrdinalIgnoreCase)) { _ = runner.KillAsync(); UpdateStatus("Killed"); key.Handled = true; }
     else if (text.Equals("r", StringComparison.OrdinalIgnoreCase)) { _ = Launch(true); key.Handled = true; }
-    else if (text.Equals("q", StringComparison.OrdinalIgnoreCase) || key.KeyCode == KeyCode.Esc) { _ = runner.StopAsync(); Application.RequestStop(); key.Handled = true; }
+    else if (text.Equals("q", StringComparison.OrdinalIgnoreCase) || key.KeyCode == KeyCode.Esc) { _ = runner.StopAsync(); app.RequestStop(); key.Handled = true; }
 };
 
 UpdateStatus(cfg.LoadMessage);
