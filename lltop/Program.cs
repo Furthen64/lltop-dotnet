@@ -291,7 +291,12 @@ static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
             var modelsPath = AppConfig.Expand(models.Text);
             if (!File.Exists(serverPath)) throw new InvalidOperationException("llama-server was not found at that location.");
             if (!Directory.Exists(modelsPath)) throw new InvalidOperationException("Models directory was not found.");
-            cfg.LlamaServer = serverPath; cfg.ModelsDir = modelsPath; cfg.Save(); completed = true; app.RequestStop();
+            cfg.LlamaServer = serverPath;
+            cfg.ModelsDir = modelsPath;
+            cfg.Save();
+            FirstRunProfiles.ScanAndGenerate(cfg);
+            completed = true;
+            app.RequestStop();
         }
         catch (Exception ex) { message.Text = ex.Message; }
     };

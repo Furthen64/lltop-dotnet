@@ -11,6 +11,7 @@ A .NET 10 + Terminal.Gui v2 control center for llama.cpp's `llama-server`.
 - Display live stdout/stderr, PID, uptime, bind address, model, and launch state.
 - Persist a timestamped log for each run.
 - Configure the llama.cpp binary and model directory with a first-run wizard.
+- Scan `.gguf` and `.bin` models after setup and generate starter profiles with Qwen, GPT-OSS, DeepSeek, or safe generic defaults.
 
 Run with:
 
