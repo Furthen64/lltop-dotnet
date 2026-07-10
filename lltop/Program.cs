@@ -106,7 +106,8 @@ static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
             var modelsPath = AppConfig.Expand(models.Text);
             if (string.IsNullOrWhiteSpace(serverPath) || !File.Exists(serverPath)) throw new InvalidOperationException("llama-server executable was not found. Enter its full path or an app directory containing it.");
             if (string.IsNullOrWhiteSpace(modelsPath)) throw new InvalidOperationException("Models directory is required.");
-            Directory.CreateDirectory(modelsPath);
+            if (!Directory.Exists(modelsPath)) throw new InvalidOperationException("Models directory was not found. Enter an existing directory containing your models.");
+            if (!Directory.EnumerateFileSystemEntries(modelsPath).Any()) throw new InvalidOperationException("Models directory is empty. Enter a directory containing your models.");
             cfg.LlamaServer = serverPath; cfg.ModelsDir = modelsPath; cfg.Save(); completed = true; app.RequestStop();
         }
         catch (Exception ex) { message.Text = ex.Message; }
