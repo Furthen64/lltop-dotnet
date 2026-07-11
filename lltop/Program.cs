@@ -79,9 +79,10 @@ void RefreshProfileItems(string? selectName = null)
     {
         var marker = p.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase)
             ? runner.State == RunnerState.Running ? "●" : "◐" : HasRun(cfg.RunsDir, p.Name) ? "●" : "○";
-        var model = string.IsNullOrWhiteSpace(p.Model) ? "model not set" : Path.GetFileName(p.Model);
-        var size = ModelSize(p.Model);
-        profileItems.Add($"{marker} {p.Name}  ·  {model}{(size.Length == 0 ? "" : $"  {size}")}");
+        var size = CompactModelSize(p.Model);
+        var text = $"{marker} {p.Name}{(size.Length == 0 ? "" : $"  {size}")}";
+        var width = Math.Max(12, profileFrame.Viewport.Width > 0 ? profileFrame.Viewport.Width - 3 : 32);
+        profileItems.Add(FitInline(text, width));
     }
     profileList.SetSource(profileItems);
     if (profiles.Count == 0) { selected = 0; profileList.SelectedItem = 0; }
@@ -109,6 +110,7 @@ void UpdateStatus(string message = "")
     }
     var model = string.IsNullOrWhiteSpace(p.Model) ? "not configured" : p.Model;
     var description = string.IsNullOrWhiteSpace(p.Description) ? "—" : p.Description;
+    var gpu = GpuLaunchInfo.ForProfile(p);
     ProfileRunSummary? summary = null;
     try
     {
@@ -120,6 +122,7 @@ void UpdateStatus(string message = "")
     status.Text = $"STATE    {state}{pid}{uptime}     PROFILE  {p.Name}     BIND  {p.Host}:{p.Port}\n" +
                   $"MODEL    {model}\n" +
                   $"DETAIL   ctx {p.Ctx:N0}  gpu layers {p.Ngl}  parallel {p.Parallel}  flash-attn {p.FlashAttn}\n" +
+                  $"GPU      {gpu.Summary}\n" +
                   $"METRIC   prompt {serverStats.PromptTokensPerSecond:F2} tok/s  eval {serverStats.EvalTokensPerSecond:F2} tok/s  offload {serverStats.OffloadedLayers}/{serverStats.TotalLayers}  progress {serverStats.Progress:P0}\n" +
                   $"ABOUT    {description}" + history + issue + (string.IsNullOrWhiteSpace(message) ? "" : $"\nINFO     {message}");
 }
@@ -428,6 +431,21 @@ static bool EditProfile(IApplication app, Profile profile, string title)
 static int ParseInt(string value, string name) => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : throw new FormatException($"{name} must be a whole number.");
 static double ParseDouble(string value, string name) => double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : throw new FormatException($"{name} must be a number.");
 static bool HasRun(string directory, string profile) { try { return RunHistory.ForProfile(directory, profile).Count > 0; } catch { return false; } }
+static string FitInline(string value, int width)
+{
+    if (width <= 0 || value.Length <= width) return value;
+    if (width <= 3) return value[..width];
+    return value[..(width - 3)] + "...";
+}
+static string CompactModelSize(string path)
+{
+    var size = ModelSize(path);
+    return size.Replace(" KiB", "K", StringComparison.Ordinal)
+               .Replace(" MiB", "M", StringComparison.Ordinal)
+               .Replace(" GiB", "G", StringComparison.Ordinal)
+               .Replace(" TiB", "T", StringComparison.Ordinal)
+               .Replace(" B", "B", StringComparison.Ordinal);
+}
 static string ModelSize(string path)
 {
     try
