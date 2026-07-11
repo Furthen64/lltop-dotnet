@@ -58,11 +58,18 @@ static class FirstRunProfiles
             .Select(Path.GetFileNameWithoutExtension)
             .OfType<string>()
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var profiledModels = store.LoadAll().Profiles
+            .Where(profile => !string.IsNullOrWhiteSpace(profile.Model))
+            .Select(profile => Path.GetFullPath(profile.Model))
+            .ToHashSet(pathComparer);
         var models = modelPaths.Select(Path.GetFullPath).ToList();
         var created = 0;
 
         foreach (var modelPath in models)
         {
+            if (!profiledModels.Add(modelPath)) continue;
+
             var baseSlug = ProfileStore.Slugify(Path.GetFileNameWithoutExtension(modelPath));
             var slug = UniqueSlug(baseSlug, existingSlugs);
             existingSlugs.Add(slug);
@@ -85,7 +92,7 @@ static class FirstRunProfiles
     {
         var profile = Profile.CreateDefault(cfg, name);
         profile.Model = Path.GetFullPath(modelPath);
-        profile.Description = "Auto-generated from first-run setup";
+        profile.Description = "Auto-generated from model discovery";
 
         var modelName = Path.GetFileNameWithoutExtension(modelPath);
         if (modelName.Contains("deepseek", StringComparison.OrdinalIgnoreCase)) ApplyDeepSeek(profile, modelName);

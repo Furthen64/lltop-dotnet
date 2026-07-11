@@ -7,7 +7,7 @@ using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
-var app = Application.Create().Init();
+using var app = Application.Create().Init();
 var cfg = AppConfig.Load();
 if (cfg.IsFirstRun && !RunFirstRunWizard(app, cfg)) return;
 
@@ -42,7 +42,7 @@ var statusFrame = new FrameView { Title = " Selected profile / server ", X = 0, 
 var status = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(), Text = "Loading…" };
 statusFrame.Add(status);
 var help = new Label { X = 1, Y = Pos.Bottom(statusFrame), Width = Dim.Fill(2), Height = 3,
-    Text = "Enter start   s stop   K kill   r restart   n new   e edit   d duplicate   x delete\nF5 reload   v preview   c copy   l autoscroll   N history/notes   q quit" };
+    Text = "[Enter] Start   [s] Stop   [r] Restart   [n] New profile   [F5] Find models\n[↑/↓] Select   [v] Preview   [N] History   [h/?] All keys   [q] Quit" };
 win.Add(banner, profileFrame, logFrame, statusFrame, help);
 LltopTheme.Apply([profileFrame, logFrame, statusFrame], banner, profileList, logView, help);
 
@@ -51,8 +51,8 @@ void ApplyLayout()
     var helpHeight = expandedHelp ? 5 : 3;
     help.Height = helpHeight;
     help.Text = expandedHelp
-        ? "NAV      Up/Down select   Enter start   q quit\nSERVER   s stop   K kill   r restart   v preview   c copy\nPROFILE  n new   e edit   d duplicate   x delete   N history/notes\nLOG      l autoscroll   PgUp/PgDown/Home/End inspect   h/? compact help"
-        : "Enter start   s stop   K kill   r restart   n new   e edit   d duplicate   x delete\nF5 reload   v preview   c copy   l autoscroll   N history/notes   h help   q quit";
+        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [v] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [F5] Find models\nLOG & RUNS  [l] Auto-scroll   [PgUp/PgDn] Scroll   [Home/End] Jump   [N] History\nHELP        [h/?] Show fewer keys"
+        : "[Enter] Start   [s] Stop   [r] Restart   [n] New profile   [F5] Find models\n[↑/↓] Select   [v] Preview   [N] History   [h/?] All keys   [q] Quit";
     var reserved = 10 + helpHeight;
     if (win.Viewport.Width is > 0 and < 84)
     {
@@ -155,6 +155,16 @@ void ReloadProfiles(string? selectName = null, string message = "Profiles reload
     RefreshProfileItems(selectName);
     var suffix = result.Errors.Count == 0 ? message : $"{message}  Skipped: {string.Join(" | ", result.Errors)}";
     UpdateStatus(suffix);
+}
+
+void RefreshModels()
+{
+    try
+    {
+        var result = FirstRunProfiles.ScanAndGenerate(cfg);
+        ReloadProfiles(message: $"Refresh complete: found {result.ModelsFound} models, created {result.ProfilesCreated} profiles.");
+    }
+    catch (Exception ex) { UpdateStatus($"Refresh failed: {ex.Message}"); }
 }
 
 async Task Launch(bool restart = false)
@@ -316,7 +326,7 @@ app.Keyboard.KeyDown += (_, key) =>
         profileList.SetFocus(); UpdateStatus(); key.Handled = true;
     }
     else if (text is "h" or "H" or "?") { expandedHelp = !expandedHelp; ApplyLayout(); key.Handled = true; }
-    else if (key.KeyCode == KeyCode.F5) { ReloadProfiles(); key.Handled = true; }
+    else if (key.KeyCode == KeyCode.F5) { RefreshModels(); key.Handled = true; }
     else if (text.Equals("q", StringComparison.OrdinalIgnoreCase) || key.KeyCode == KeyCode.Esc) { _ = Quit(); key.Handled = true; }
 };
 

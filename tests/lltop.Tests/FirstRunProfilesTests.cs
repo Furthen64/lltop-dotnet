@@ -70,6 +70,25 @@ public sealed class FirstRunProfilesTests : IDisposable
         Assert.Contains(loaded.Profiles, profile => profile.Name == "other" && profile.Ctx == 4096);
     }
 
+    [Fact]
+    public void ScanAndGenerate_OnRefreshCreatesOnlyProfilesForNewModels()
+    {
+        var cfg = Config();
+        Write("Qwen3.gguf");
+
+        var first = FirstRunProfiles.ScanAndGenerate(cfg);
+        Write("family/releases/DeepSeek-V3.gguf");
+        var refresh = FirstRunProfiles.ScanAndGenerate(cfg);
+        var loaded = new ProfileStore(cfg.ProfilesDir).LoadAll();
+
+        Assert.Equal(1, first.ProfilesCreated);
+        Assert.Equal(2, refresh.ModelsFound);
+        Assert.Equal(1, refresh.ProfilesCreated);
+        Assert.Equal(3, loaded.Profiles.Count); // starter plus one profile per model
+        Assert.Contains(loaded.Profiles, profile => profile.Name == "qwen3" && profile.ChatTemplate == "chatml");
+        Assert.Contains(loaded.Profiles, profile => profile.Name == "deepseek-v3" && profile.ChatTemplate == "deepseek3");
+    }
+
     AppConfig Config() => new()
     {
         LlamaServer = "/llama-server",
