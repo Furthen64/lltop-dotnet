@@ -45,7 +45,7 @@ static class FirstRunProfiles
         }
     }
 
-    public static GeneratedProfilesResult Generate(AppConfig cfg, IEnumerable<string> modelPaths)
+    public static GeneratedProfilesResult Generate(AppConfig cfg, IEnumerable<string> modelPaths, ServerCapabilityRecord? capabilities = null)
     {
         ArgumentNullException.ThrowIfNull(cfg);
         ArgumentNullException.ThrowIfNull(modelPaths);
@@ -74,7 +74,7 @@ static class FirstRunProfiles
             var slug = UniqueSlug(baseSlug, existingSlugs);
             existingSlugs.Add(slug);
 
-            var profile = CreateForModel(cfg, slug, modelPath);
+            var profile = CreateForModel(cfg, slug, modelPath, capabilities);
             store.Save(profile);
             created++;
         }
@@ -82,13 +82,13 @@ static class FirstRunProfiles
         return new(models.Count, created);
     }
 
-    public static GeneratedProfilesResult ScanAndGenerate(AppConfig cfg)
+    public static GeneratedProfilesResult ScanAndGenerate(AppConfig cfg, ServerCapabilityRecord? capabilities = null)
     {
         var models = DiscoverModels(cfg.ModelsDir);
-        return Generate(cfg, models);
+        return Generate(cfg, models, capabilities);
     }
 
-    public static Profile CreateForModel(AppConfig cfg, string name, string modelPath)
+    public static Profile CreateForModel(AppConfig cfg, string name, string modelPath, ServerCapabilityRecord? capabilities = null)
     {
         var profile = Profile.CreateDefault(cfg, name);
         profile.Model = Path.GetFullPath(modelPath);
@@ -99,6 +99,8 @@ static class FirstRunProfiles
         else if (IsGptOss(modelName)) ApplyGptOss(profile);
         else if (modelName.Contains("qwen", StringComparison.OrdinalIgnoreCase)) ApplyQwen(profile);
         else ApplyUnknown(profile);
+        ApplyHardwareDefaults(profile, capabilities);
+        ApplyCapabilityDefaults(profile, capabilities);
 
         return profile;
     }
@@ -191,5 +193,29 @@ static class FirstRunProfiles
         profile.NoMmap = false;
         profile.ChatTemplate = "";
         profile.Reasoning = "auto";
+    }
+
+    static void ApplyHardwareDefaults(Profile profile, ServerCapabilityRecord? capabilities)
+    {
+        if (capabilities?.IsPascalCuda != true) return;
+        profile.Ctx = 4096;
+        profile.Batch = 256;
+        profile.UBatch = 128;
+        profile.Parallel = 1;
+        profile.FlashAttn = "off";
+    }
+
+    static void ApplyCapabilityDefaults(Profile profile, ServerCapabilityRecord? capabilities)
+    {
+        if (capabilities is null) return;
+        if (!capabilities.SupportsOption("--reasoning")) profile.Reasoning = "";
+        if (!capabilities.SupportsOption("--reasoning-budget")) profile.ReasoningBudget = -1;
+        if (!capabilities.SupportsOption("--chat-template")) profile.ChatTemplate = "";
+        if (!capabilities.SupportsOption("--jinja")) profile.Jinja = false;
+        if (!capabilities.SupportsOption("--metrics")) profile.Metrics = false;
+        if (!capabilities.SupportsOption("--no-mmap")) profile.NoMmap = false;
+        if (!capabilities.SupportsOption("--flash-attn")) profile.FlashAttn = "";
+        if (!capabilities.SupportsOption("--cache-type-k")) profile.CacheK = "";
+        if (!capabilities.SupportsOption("--cache-type-v")) profile.CacheV = "";
     }
 }

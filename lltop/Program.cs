@@ -16,6 +16,7 @@ var load = store.LoadAll();
 var profiles = load.Profiles;
 var selected = Math.Max(0, profiles.FindIndex(p => p.Name.Equals(cfg.DefaultProfile, StringComparison.OrdinalIgnoreCase)));
 var runner = new ServerRunner();
+var capabilityCache = new ServerCapabilityCache(Path.Combine(Path.GetDirectoryName(AppConfig.ConfigPath) ?? cfg.LogsDir, "server-capabilities.json"));
 var runningProfile = "";
 Profile? activeProfile = null;
 var serverStats = new ServerStats();
@@ -30,6 +31,7 @@ var expandedHelp = false;
 var externalMonitor = new ExternalServerMonitor(cfg);
 ExternalServer? externalServer = null;
 using var monitorCancellation = new CancellationTokenSource();
+_ = capabilityCache.Get(cfg.LlamaServer);
 
 var win = new Window { Title = " lltop · llama.cpp control center ", X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
 var banner = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Text = "LLAMA SERVER  •  profiles, launches, and live output" };
@@ -111,6 +113,8 @@ void UpdateStatus(string message = "")
     var model = string.IsNullOrWhiteSpace(p.Model) ? "not configured" : p.Model;
     var description = string.IsNullOrWhiteSpace(p.Description) ? "—" : p.Description;
     var gpu = GpuLaunchInfo.ForProfile(p);
+    var capability = CapabilitiesFor(p);
+    var plan = LaunchPlanFor(p, capability);
     ProfileRunSummary? summary = null;
     try
     {
@@ -119,12 +123,19 @@ void UpdateStatus(string message = "")
     catch { }
     var history = summary is null ? "" : $"\nHISTORY  {summary.RunCount} runs  gen latest {summary.Generation.Latest:F2} avg {summary.Generation.Average:F2} tok/s  {RunHistory.Sparkline(summary.Generation.Series)}";
     var issue = serverStats.LastError.Length > 0 ? $"\nERROR    {serverStats.LastError}" : serverStats.LastHint.Length > 0 ? $"\nHINT     {serverStats.LastHint}" : "";
+    var backend = string.IsNullOrWhiteSpace(capability.Backend) ? "unknown" : capability.Backend;
+    var gpuName = string.IsNullOrWhiteSpace(capability.GpuName) ? "unknown" : capability.GpuName;
+    var compute = string.IsNullOrWhiteSpace(capability.ComputeCapability) ? "unknown" : capability.ComputeCapability;
+    var removed = plan.RemovedArguments.Count == 0 ? "" : $"\nFILTER   removed {string.Join(", ", plan.RemovedArguments.Select(x => x.OptionName).Distinct(StringComparer.Ordinal))}";
+    var probe = string.IsNullOrWhiteSpace(capability.ProbeMessage) ? "" : $"\nPROBE    {capability.ProbeMessage}";
     status.Text = $"STATE    {state}{pid}{uptime}     PROFILE  {p.Name}     BIND  {p.Host}:{p.Port}\n" +
                   $"MODEL    {model}\n" +
                   $"DETAIL   ctx {p.Ctx:N0}  gpu layers {p.Ngl}  parallel {p.Parallel}  flash-attn {p.FlashAttn}\n" +
                   $"GPU      {gpu.Summary}\n" +
+                  $"SERVER   backend {backend}  gpu {gpuName}  cc {compute}\n" +
+                  $"BUILD    llama.cpp {capability.BuildSummary}  compatibility {capability.CompatibilityMode}\n" +
                   $"METRIC   prompt {serverStats.PromptTokensPerSecond:F2} tok/s  eval {serverStats.EvalTokensPerSecond:F2} tok/s  offload {serverStats.OffloadedLayers}/{serverStats.TotalLayers}  progress {serverStats.Progress:P0}\n" +
-                  $"ABOUT    {description}" + history + issue + (string.IsNullOrWhiteSpace(message) ? "" : $"\nINFO     {message}");
+                  $"ABOUT    {description}" + history + removed + probe + issue + (string.IsNullOrWhiteSpace(message) ? "" : $"\nINFO     {message}");
 }
 
 void RefreshLogs()
@@ -164,7 +175,7 @@ void RefreshModels()
 {
     try
     {
-        var result = FirstRunProfiles.ScanAndGenerate(cfg);
+        var result = FirstRunProfiles.ScanAndGenerate(cfg, capabilityCache.Get(cfg.LlamaServer));
         ReloadProfiles(message: $"Refresh complete: found {result.ModelsFound} models, created {result.ProfilesCreated} profiles.");
     }
     catch (Exception ex) { UpdateStatus($"Refresh failed: {ex.Message}"); }
@@ -189,12 +200,25 @@ async Task Launch(bool restart = false)
             var recent = RunHistory.FindRecentFailure(cfg.RunsDir, profile, cfg.RecentFailureWindowSeconds, cfg.StartupFailureSeconds);
             if (recent is not null && MessageBox.Query(app, "Recent startup failure", $"This configuration failed recently (exit {recent.ExitCode}, {recent.DurationSeconds:F1}s).\n\nRun it again?", "Cancel", "Run again") != 1) return;
         }
+        var capability = CapabilitiesFor(profile);
+        var plan = LaunchPlanFor(profile, capability);
+        if (plan.HasManualRemovals)
+        {
+            var removed = string.Join('\n', plan.RemovedArguments.Where(x => x.FromManualArgs).Select(x => x.Display).Distinct(StringComparer.Ordinal));
+            if (MessageBox.Query(app, "Unsupported raw arguments", $"The configured llama-server does not support:\n\n{removed}\n\nLaunch after filtering them out?", "Cancel", "Launch filtered") != 1)
+            {
+                UpdateStatus("Launch cancelled because unsupported raw arguments were removed.");
+                return;
+            }
+        }
         logLines.Clear(); RefreshLogs();
         lock (activeRunGate) { serverStats = new ServerStats(); activeProfile = profile.Copy(profile.Name); }
         runningProfile = profile.Name;
-        await runner.StartAsync(cfg, profile);
+        await runner.StartAsync(plan, profile, cfg);
         RefreshProfileItems(profile.Name);
-        UpdateStatus($"Started successfully. Log: {runner.LogPath}");
+        UpdateStatus(plan.RemovedArguments.Count == 0
+            ? $"Started successfully. Log: {runner.LogPath}"
+            : $"Started with compatibility filtering. Removed: {string.Join(", ", plan.RemovedArguments.Select(x => x.OptionName).Distinct(StringComparer.Ordinal))}. Log: {runner.LogPath}");
     }
     catch (Exception ex)
     {
@@ -306,12 +330,12 @@ app.Keyboard.KeyDown += (_, key) =>
     else if (text.Equals("v", StringComparison.OrdinalIgnoreCase))
     {
         var p = SelectedProfile();
-        UpdateStatus(p is null ? "No profile selected." : ServerRunner.BuildArguments(p).Aggregate("llama-server", (all, arg) => all + " " + arg));
+        UpdateStatus(p is null ? "No profile selected." : FormatPlanSummary(LaunchPlanFor(p, CapabilitiesFor(p))));
         key.Handled = true;
     }
     else if (text.Equals("c", StringComparison.OrdinalIgnoreCase))
     {
-        var command = (runner.IsActive ? runner.Command : externalServer?.Command ?? (SelectedProfile() is { } p ? ServerRunner.BuildArguments(p).Aggregate("llama-server", (all, arg) => all + " " + arg) : "")) ?? "";
+        var command = (runner.IsActive ? runner.Command : externalServer?.Command ?? (SelectedProfile() is { } p ? FormatPlanCommand(LaunchPlanFor(p, CapabilitiesFor(p))) : "")) ?? "";
         UpdateStatus(command.Length > 0 && app.Clipboard?.TrySetClipboardData(command) == true ? "Copied launch command to clipboard." : "Clipboard is unavailable.");
         key.Handled = true;
     }
@@ -524,7 +548,7 @@ static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
             cfg.LlamaServer = serverPath;
             cfg.ModelsDir = modelsPath;
             cfg.Save();
-            FirstRunProfiles.ScanAndGenerate(cfg);
+            FirstRunProfiles.ScanAndGenerate(cfg, new ServerCapabilityCache(Path.Combine(Path.GetDirectoryName(AppConfig.ConfigPath) ?? cfg.LogsDir, "server-capabilities.json")).Get(cfg.LlamaServer));
             completed = true;
             app.RequestStop();
         }
@@ -533,4 +557,26 @@ static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
     cancel.Accepting += (_, _) => app.RequestStop();
     app.Run(wizard);
     return completed;
+}
+
+ServerCapabilityRecord CapabilitiesFor(Profile profile)
+{
+    var executable = string.IsNullOrWhiteSpace(profile.LlamaServer) ? cfg.LlamaServer : profile.LlamaServer;
+    return capabilityCache.Get(executable);
+}
+
+LaunchPlan LaunchPlanFor(Profile profile, ServerCapabilityRecord capabilities)
+{
+    var executable = string.IsNullOrWhiteSpace(profile.LlamaServer) ? cfg.LlamaServer : profile.LlamaServer;
+    return ServerRunner.BuildLaunchPlan(executable, profile, capabilities);
+}
+
+static string FormatPlanCommand(LaunchPlan plan) => string.Join(' ', new[] { plan.Executable }.Concat(plan.FilteredArguments));
+
+static string FormatPlanSummary(LaunchPlan plan)
+{
+    var command = FormatPlanCommand(plan);
+    return plan.RemovedArguments.Count == 0
+        ? command
+        : $"{command}\nRemoved unsupported options: {string.Join(", ", plan.RemovedArguments.Select(x => x.Display).Distinct(StringComparer.Ordinal))}";
 }
