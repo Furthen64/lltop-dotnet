@@ -21,8 +21,13 @@ A .NET 10 + Terminal.Gui v2 control center for llama.cpp's `llama-server`.
 Run with:
 
 ```sh
+./checkreqs.sh
+./lltop/build.sh
 ./lltop/launch.sh
 ```
+
+`checkreqs.sh` verifies that Ubuntu has the .NET 10 SDK needed to build the app
+and prints installation instructions when it is missing.
 
 The main keys are shown in the application footer. Press `N` for run history and
 notes, `c` to copy the launch command, and `l` to toggle log autoscroll. Profiles
