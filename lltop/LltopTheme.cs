@@ -30,7 +30,7 @@ internal static class LltopTheme
             Override(frame, _ => new TuiAttribute(PanelBorder, normal.Background));
 
         Override(banner, _ => new TuiAttribute(Title, normal.Background, TextStyle.Bold));
-        Override(help, _ => new TuiAttribute(Muted, normal.Background));
+        Override(help, _ => new TuiAttribute(Muted, normal.Background, TextStyle.Faint));
 
         Override(profileList, role => role is VisualRole.Focus or VisualRole.Active
             ? new TuiAttribute(SelectedText, SelectedBackground, TextStyle.Bold)

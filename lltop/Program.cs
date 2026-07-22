@@ -30,6 +30,8 @@ var logScrollRow = 0;
 var expandedHelp = false;
 var externalMonitor = new ExternalServerMonitor(cfg);
 ExternalServer? externalServer = null;
+var resourceGpuBackend = "";
+var resourceGpuName = "";
 using var monitorCancellation = new CancellationTokenSource();
 _ = capabilityCache.Get(cfg.LlamaServer);
 
@@ -45,17 +47,24 @@ var status = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(),
 statusFrame.Add(status);
 var help = new Label { X = 1, Y = Pos.Bottom(statusFrame), Width = Dim.Fill(2), Height = 3,
     Text = "[Enter] Start   [s] Stop   [r] Restart   [n] New profile   [F5] Find models\n[↑/↓] Select   [v] Preview   [N] History   [h/?] All keys   [q] Quit" };
-win.Add(banner, profileFrame, logFrame, statusFrame, help);
+var resourceStrip = new ResourceStripView { X = 1, Y = Pos.Bottom(help), Width = Dim.Fill(2) };
+win.Add(banner, profileFrame, logFrame, statusFrame, help, resourceStrip);
 LltopTheme.Apply([profileFrame, logFrame, statusFrame], banner, profileList, logView, help);
+
+ISystemResourceProvider resourceProvider = OperatingSystem.IsLinux()
+    ? new LinuxSystemResourceProvider(
+        () => (resourceGpuBackend, resourceGpuName),
+        () => runner.State == RunnerState.Running ? 1 : 0)
+    : new UnavailableSystemResourceProvider(() => runner.State == RunnerState.Running ? 1 : 0);
 
 void ApplyLayout()
 {
-    var helpHeight = expandedHelp ? 5 : 3;
+    var helpHeight = expandedHelp ? 5 : 2;
     help.Height = helpHeight;
     help.Text = expandedHelp
         ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [v] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [F5] Find models\nLOG & RUNS  [l] Auto-scroll   [PgUp/PgDn] Scroll   [Home/End] Jump   [N] History\nHELP        [h/?] Show fewer keys"
         : "[Enter] Start   [s] Stop   [r] Restart   [n] New profile   [F5] Find models\n[↑/↓] Select   [v] Preview   [N] History   [h/?] All keys   [q] Quit";
-    var reserved = 10 + helpHeight;
+    var reserved = 10 + helpHeight + 1;
     if (win.Viewport.Width is > 0 and < 84)
     {
         var profileHeight = Math.Max(6, (win.Viewport.Height - reserved - 2) / 3);
@@ -69,6 +78,7 @@ void ApplyLayout()
     }
     statusFrame.Y = Pos.Bottom(logFrame);
     help.Y = Pos.Bottom(statusFrame);
+    resourceStrip.Y = Pos.Bottom(help);
 }
 win.ViewportChanged += (_, _) => ApplyLayout();
 ApplyLayout();
@@ -107,6 +117,8 @@ void UpdateStatus(string message = "")
     var uptime = runner.StartedAt is { } started && runner.IsActive ? $"  Uptime {(DateTimeOffset.Now - started):hh\\:mm\\:ss}" : "";
     if (p is null)
     {
+        resourceGpuBackend = "";
+        resourceGpuName = "";
         status.Text = $"STATE    {state}{pid}\n\nNo profiles found in {cfg.ProfilesDir}\n{message}";
         return;
     }
@@ -114,6 +126,8 @@ void UpdateStatus(string message = "")
     var description = string.IsNullOrWhiteSpace(p.Description) ? "—" : p.Description;
     var gpu = GpuLaunchInfo.ForProfile(p);
     var capability = CapabilitiesFor(p);
+    resourceGpuBackend = capability.Backend;
+    resourceGpuName = capability.GpuName;
     var plan = LaunchPlanFor(p, capability);
     ProfileRunSummary? summary = null;
     try
@@ -383,6 +397,24 @@ _ = Task.Run(async () =>
         }
         catch (OperationCanceledException) { break; }
         catch { await Task.Delay(2000); }
+    }
+});
+_ = Task.Run(async () =>
+{
+    while (!monitorCancellation.IsCancellationRequested)
+    {
+        try
+        {
+            var snapshot = await resourceProvider.GetSnapshotAsync(monitorCancellation.Token);
+            app.Invoke(() => resourceStrip.Snapshot = snapshot);
+            await Task.Delay(TimeSpan.FromSeconds(2), monitorCancellation.Token);
+        }
+        catch (OperationCanceledException) when (monitorCancellation.IsCancellationRequested) { break; }
+        catch
+        {
+            try { await Task.Delay(TimeSpan.FromSeconds(5), monitorCancellation.Token); }
+            catch (OperationCanceledException) { break; }
+        }
     }
 });
 app.Run(win);
