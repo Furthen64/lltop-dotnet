@@ -26,25 +26,27 @@ internal sealed class LinuxSystemResourceProvider : ISystemResourceProvider
 {
     private readonly Func<(string Backend, string Name)> gpuDescription;
     private readonly Func<int> runningServerCount;
+    private readonly Func<CancellationToken, Task<GpuResourceMetrics?>> readNvidiaMetricsAsync;
     private readonly object cpuGate = new();
     private CpuTimes? previousCpuTimes;
 
     public LinuxSystemResourceProvider(
         Func<(string Backend, string Name)> gpuDescription,
-        Func<int> runningServerCount)
+        Func<int> runningServerCount,
+        Func<CancellationToken, Task<GpuResourceMetrics?>>? readNvidiaMetricsAsync = null)
     {
         this.gpuDescription = gpuDescription;
         this.runningServerCount = runningServerCount;
+        this.readNvidiaMetricsAsync = readNvidiaMetricsAsync ?? ReadNvidiaMetricsAsync;
     }
 
     public async Task<SystemResourceSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
         var proc = await Task.Run(ReadProcSnapshot, cancellationToken);
         var description = gpuDescription();
-        var gpu = description.Backend.Equals("CUDA", StringComparison.OrdinalIgnoreCase) ||
-                  description.Name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase)
-            ? await ReadNvidiaMetricsAsync(cancellationToken)
-            : null;
+        // Hardware telemetry must not depend on the selected server/profile probe.
+        // That probe can still be pending (or unavailable) even when nvidia-smi works.
+        var gpu = await readNvidiaMetricsAsync(cancellationToken);
 
         return new SystemResourceSnapshot
         {

@@ -90,6 +90,22 @@ public sealed class ResourceStripTests
         Assert.Null(LinuxSystemResourceProvider.ParseCpuTimes("cpu malformed"));
     }
 
+    [Fact]
+    public async Task LinuxProviderCollectsGpuMetricsWithoutAProfileCapabilityDescription()
+    {
+        var provider = new LinuxSystemResourceProvider(
+            () => ("", ""),
+            () => 0,
+            _ => Task.FromResult<GpuResourceMetrics?>(new GpuResourceMetrics(42, 3 * GiB, 8 * GiB, "Test GPU")));
+
+        var snapshot = await provider.GetSnapshotAsync();
+
+        Assert.Equal(42, snapshot.GpuUsagePercent);
+        Assert.Equal(3 * GiB, snapshot.VramUsedBytes);
+        Assert.Equal(8 * GiB, snapshot.VramTotalBytes);
+        Assert.Equal("Test GPU", snapshot.GpuName);
+    }
+
     private static SystemResourceSnapshot SampleSnapshot() => new()
     {
         VramUsedBytes = 22 * GiB,

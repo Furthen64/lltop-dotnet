@@ -23,7 +23,7 @@ Run with:
 ```sh
 ./checkreqs.sh
 ./lltop/build.sh
-./lltop/launch.sh
+./launch.sh
 ```
 
 `checkreqs.sh` verifies that Ubuntu has the .NET 10 SDK needed to build the app

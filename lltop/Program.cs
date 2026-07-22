@@ -54,8 +54,8 @@ LltopTheme.Apply([profileFrame, logFrame, statusFrame], banner, profileList, log
 ISystemResourceProvider resourceProvider = OperatingSystem.IsLinux()
     ? new LinuxSystemResourceProvider(
         () => (resourceGpuBackend, resourceGpuName),
-        () => runner.State == RunnerState.Running ? 1 : 0)
-    : new UnavailableSystemResourceProvider(() => runner.State == RunnerState.Running ? 1 : 0);
+        () => runner.State == RunnerState.Running || externalServer is not null ? 1 : 0)
+    : new UnavailableSystemResourceProvider(() => runner.State == RunnerState.Running || externalServer is not null ? 1 : 0);
 
 void ApplyLayout()
 {
