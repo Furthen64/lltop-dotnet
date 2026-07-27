@@ -8,6 +8,7 @@ public sealed class LogLineStyleTests
     [InlineData("model load failed", "Error")]
     [InlineData("warning: context reduced", "Warning")]
     [InlineData("eval: 42.0 tokens per second", "Performance")]
+    [InlineData("n_decoded = 399, tg = 19.80 t/s, tg_3s = 19.61 t/s", "Performance")]
     [InlineData("load_tensors: offloaded 26/49 layers to GPU", "Offload")]
     [InlineData("prompt processing progress = 0.5", "Progress")]
     public void ClassifyMatchesGoColorRules(string line, string expected)
