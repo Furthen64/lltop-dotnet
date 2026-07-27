@@ -11,6 +11,9 @@ internal sealed class ParsedLogLine
     public int EvalTokens { get; init; }
     public double EvalMsPerToken { get; init; }
     public double EvalTokensPerSecond { get; init; }
+    public int DecodedTokens { get; init; }
+    public double GenerationTokensPerSecond { get; init; }
+    public double GenerationTokensPerSecond3s { get; init; }
     public double TotalMs { get; init; }
     public int TotalTokens { get; init; }
     public int OffloadedLayers { get; init; }
@@ -37,6 +40,7 @@ internal static partial class LlamaLogParser
     {
         var prompt = PromptEval().Match(line);
         var eval = Eval().Match(line);
+        var generation = GenerationProgress().Match(line);
         var total = Total().Match(line);
         var offload = Offload().Match(line);
         var progress = Progress().Match(line);
@@ -60,6 +64,7 @@ internal static partial class LlamaLogParser
         {
             PromptEvalMs = D(prompt, 1), PromptTokens = I(prompt, 2), PromptMsPerToken = D(prompt, 3), PromptTokensPerSecond = D(prompt, 4),
             EvalMs = D(eval, 1), EvalTokens = I(eval, 2), EvalMsPerToken = D(eval, 3), EvalTokensPerSecond = D(eval, 4),
+            DecodedTokens = I(generation, 1), GenerationTokensPerSecond = D(generation, 2), GenerationTokensPerSecond3s = D(generation, 3),
             TotalMs = D(total, 1), TotalTokens = I(total, 2), OffloadedLayers = I(offload, 1), TotalLayers = I(offload, 2),
             Progress = D(progress, 3), ChatFormat = chat.Success ? chat.Groups[1].Value.Trim() : "", ContextSlotSize = I(context, 1),
             GpuTotalMiB = I(memory, 2), GpuFreeMiB = I(memory, 3), GpuModelMiB = I(memory, 4), GpuContextMiB = I(memory, 5), GpuComputeMiB = I(memory, 6),
@@ -77,6 +82,8 @@ internal static partial class LlamaLogParser
     private static partial Regex PromptEval();
     [GeneratedRegex(@"(?<!prompt )eval time =\s+(\d+\.\d+) ms /\s+(\d+) tokens.*?(\d+\.\d+) ms per token.*?(\d+\.\d+) tokens per second")]
     private static partial Regex Eval();
+    [GeneratedRegex(@"n_decoded\s*=\s*(\d+),\s*tg\s*=\s*(\d+(?:\.\d+)?)\s*t/s,\s*tg_3s\s*=\s*(\d+(?:\.\d+)?)\s*t/s")]
+    private static partial Regex GenerationProgress();
     [GeneratedRegex(@"total time =\s+(\d+\.\d+) ms /\s+(\d+) tokens")]
     private static partial Regex Total();
     [GeneratedRegex(@"load_tensors: offloaded (\d+)/(\d+) layers to GPU")]
@@ -95,6 +102,7 @@ internal sealed class ServerStats
 {
     public double PromptTokensPerSecond { get; private set; }
     public double EvalTokensPerSecond { get; private set; }
+    public double GenerationTokensPerSecond3s { get; private set; }
     public int PromptTokens { get; private set; }
     public int GeneratedTokens { get; private set; }
     public int OffloadedLayers { get; private set; }
@@ -116,6 +124,12 @@ internal sealed class ServerStats
         var p = LlamaLogParser.Parse(line);
         if (p.PromptTokensPerSecond > 0) { PromptTokensPerSecond = p.PromptTokensPerSecond; PromptTokens = p.PromptTokens; }
         if (p.EvalTokensPerSecond > 0) { EvalTokensPerSecond = p.EvalTokensPerSecond; GeneratedTokens = p.EvalTokens; }
+        if (p.GenerationTokensPerSecond > 0)
+        {
+            EvalTokensPerSecond = p.GenerationTokensPerSecond;
+            GenerationTokensPerSecond3s = p.GenerationTokensPerSecond3s;
+            GeneratedTokens = p.DecodedTokens;
+        }
         if (p.TotalLayers > 0) { OffloadedLayers = p.OffloadedLayers; TotalLayers = p.TotalLayers; }
         if (p.Progress > 0) Progress = p.Progress;
         if (p.ChatFormat.Length > 0) ChatFormat = p.ChatFormat;
