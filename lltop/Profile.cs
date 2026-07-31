@@ -18,10 +18,10 @@ sealed class Profile
     public double TopP { get; set; } = .95;
     public int TopK { get; set; } = 40;
     public double MinP { get; set; } = .05;
-    public double RepeatPenalty { get; set; } = 1;
-    public int RepeatLastN { get; set; } = 64;
-    public double PresencePenalty { get; set; }
-    public double FrequencyPenalty { get; set; }
+    public double RepeatPenalty { get; set; } = 1.10;
+    public int RepeatLastN { get; set; } = 256;
+    public double PresencePenalty { get; set; } = 0.0;
+    public double FrequencyPenalty { get; set; } = 0.0;
     public int Batch { get; set; } = 512;
     public int UBatch { get; set; } = 256;
     public int Parallel { get; set; } = 1;
