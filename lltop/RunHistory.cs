@@ -60,7 +60,13 @@ internal sealed class RunRecord
 
 internal sealed record RunRecordRef(string Path, RunRecord Record);
 internal sealed record MetricSummary(int Count, double Latest, double Average, double Median, double Min, double Max, IReadOnlyList<double> Series);
-internal sealed record ProfileRunSummary(string ProfileName, int RunCount, MetricSummary Prompt, MetricSummary Generation);
+internal sealed record ProfileRunSummary(
+    string ProfileName,
+    int RunCount,
+    MetricSummary Prompt,
+    MetricSummary Generation,
+    DateTimeOffset? LastRunAt,
+    int? LastExitCode);
 
 internal static class RunHistory
 {
@@ -84,7 +90,8 @@ internal static class RunHistory
     public static ProfileRunSummary Summarize(string directory, string profile)
     {
         var records = ForProfile(directory, profile).Select(x => x.Record).OrderBy(x => x.StartedAt).ToList();
-        return new(profile, records.Count, Summary(records.Select(x => x.PromptTokensPerSecond)), Summary(records.Select(x => x.EvalTokensPerSecond)));
+        var latest = records.LastOrDefault();
+        return new(profile, records.Count, Summary(records.Select(x => x.PromptTokensPerSecond)), Summary(records.Select(x => x.EvalTokensPerSecond)), latest?.StartedAt, latest?.ExitCode);
     }
 
     static MetricSummary Summary(IEnumerable<double> source)

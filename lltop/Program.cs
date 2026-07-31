@@ -38,7 +38,7 @@ _ = capabilityCache.Get(cfg.LlamaServer);
 var win = new Window { Title = " lltop · llama.cpp control center ", X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
 var banner = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Text = "LLAMA SERVER  •  profiles, launches, and live output" };
 var profileFrame = new FrameView { Title = " Profiles ", X = 0, Y = 2, Width = Dim.Percent(34), Height = Dim.Fill(13) };
-var logFrame = new FrameView { Title = " Live log ", X = Pos.Right(profileFrame), Y = 2, Width = Dim.Fill(), Height = Dim.Fill(13) };
+var logFrame = new FrameView { Title = " Profile overview ", X = Pos.Right(profileFrame), Y = 2, Width = Dim.Fill(), Height = Dim.Fill(13) };
 var profileList = new ListView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
 var logView = new LogTextView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), ReadOnly = true, WordWrap = false, Text = "Waiting for a server launch…" };
 profileFrame.Add(profileList); logFrame.Add(logView);
@@ -46,10 +46,10 @@ var statusFrame = new FrameView { Title = " Selected profile / server ", X = 0, 
 var status = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(), Text = "Loading…" };
 statusFrame.Add(status);
 var help = new Label { X = 1, Y = Pos.Bottom(statusFrame), Width = Dim.Fill(2), Height = 3,
-    Text = "[Enter] Start   [s] Stop   [r] Restart   [n] New profile   [F5] Find models\n[↑/↓] Select   [v] Preview   [N] History   [h/?] All keys   [q] Quit" };
+    Text = "[Enter] Start   [e] Edit   [v] Preview   [n] New   [F5] Find models\n[↑/↓] Select   [s] Stop   [N] History   [h/?] All keys   [q] Quit" };
 var resourceStrip = new ResourceStripView { X = 1, Y = Pos.Bottom(help), Width = Dim.Fill(2) };
 win.Add(banner, profileFrame, logFrame, statusFrame, help, resourceStrip);
-LltopTheme.Apply([profileFrame, logFrame, statusFrame], banner, profileList, logView, help);
+LltopTheme.Apply([profileFrame, logFrame, statusFrame], banner, profileList, logView, status, help);
 
 ISystemResourceProvider resourceProvider = OperatingSystem.IsLinux()
     ? new LinuxSystemResourceProvider(
@@ -59,11 +59,11 @@ ISystemResourceProvider resourceProvider = OperatingSystem.IsLinux()
 
 void ApplyLayout()
 {
-    var helpHeight = expandedHelp ? 5 : 2;
+    var helpHeight = expandedHelp ? 6 : 2;
     help.Height = helpHeight;
     help.Text = expandedHelp
-        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [v] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [F5] Find models\nLOG & RUNS  [l] Auto-scroll   [PgUp/PgDn] Scroll   [Home/End] Jump   [N] History\nHELP        [h/?] Show fewer keys"
-        : "[Enter] Start   [s] Stop   [r] Restart   [n] New profile   [F5] Find models\n[↑/↓] Select   [v] Preview   [N] History   [h/?] All keys   [q] Quit";
+        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [v] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [F5] Find models\nLOG & RUNS  [l] Auto-scroll   [PgUp/PgDn] Scroll   [Home/End] Jump   [N] History\nSTATUS      [▶] Running   [◐] Starting/stopping   [!] Last run failed   [V] Vision\nHELP        [h/?] Show fewer keys"
+        : "[Enter] Start   [e] Edit   [v] Preview   [n] New   [F5] Find models\n[↑/↓] Select   [s] Stop   [N] History   [h/?] All keys   [q] Quit";
     var reserved = 10 + helpHeight + 1;
     if (win.Viewport.Width is > 0 and < 84)
     {
@@ -89,12 +89,13 @@ void RefreshProfileItems(string? selectName = null)
     if (profiles.Count == 0) profileItems.Add("  No profiles yet — press n to create one");
     else foreach (var p in profiles)
     {
+        var summary = SummaryFor(p.Name);
         var marker = p.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase)
-            ? runner.State == RunnerState.Running ? "●" : "◐" : HasRun(cfg.RunsDir, p.Name) ? "●" : "○";
+            ? runner.State == RunnerState.Running ? "▶" : "◐"
+            : summary?.LastExitCode is not null and not 0 ? "!" : "○";
         var size = CompactModelSize(p.Model);
-        var text = $"{marker} {p.Name}{(size.Length == 0 ? "" : $"  {size}")}";
         var width = Math.Max(12, profileFrame.Viewport.Width > 0 ? profileFrame.Viewport.Width - 3 : 32);
-        profileItems.Add(FitInline(text, width));
+        profileItems.Add(UiText.ProfileRow(marker, p.Vision, p.Name, size, width));
     }
     profileList.SetSource(profileItems);
     if (profiles.Count == 0) { selected = 0; profileList.SelectedItem = 0; }
@@ -107,6 +108,17 @@ void RefreshProfileItems(string? selectName = null)
 }
 
 Profile? SelectedProfile() => profiles.Count == 0 ? null : profiles[Math.Clamp(selected, 0, profiles.Count - 1)];
+
+ProfileRunSummary? SummaryFor(string profileName)
+{
+    try
+    {
+        if (!historySummaries.TryGetValue(profileName, out var summary))
+            historySummaries[profileName] = summary = RunHistory.Summarize(cfg.RunsDir, profileName);
+        return summary;
+    }
+    catch { return null; }
+}
 
 void UpdateStatus(string message = "")
 {
@@ -122,41 +134,81 @@ void UpdateStatus(string message = "")
         status.Text = $"STATE    {state}{pid}\n\nNo profiles found in {cfg.ProfilesDir}\n{message}";
         return;
     }
-    var model = string.IsNullOrWhiteSpace(p.Model) ? "not configured" : p.Model;
-    var description = string.IsNullOrWhiteSpace(p.Description) ? "—" : p.Description;
+    var model = string.IsNullOrWhiteSpace(p.Model) ? "not configured" : Path.GetFileName(p.Model);
+    var modelSize = ModelSize(p.Model);
     var gpu = GpuLaunchInfo.ForProfile(p);
     var capability = CapabilitiesFor(p);
     resourceGpuBackend = capability.Backend;
     resourceGpuName = capability.GpuName;
     var plan = LaunchPlanFor(p, capability);
-    ProfileRunSummary? summary = null;
-    try
-    {
-        if (!historySummaries.TryGetValue(p.Name, out summary)) historySummaries[p.Name] = summary = RunHistory.Summarize(cfg.RunsDir, p.Name);
-    }
-    catch { }
-    var history = summary is null ? "" : $"\nHISTORY  {summary.RunCount} runs  gen latest {summary.Generation.Latest:F2} avg {summary.Generation.Average:F2} tok/s  {RunHistory.Sparkline(summary.Generation.Series)}";
-    var issue = serverStats.LastError.Length > 0 ? $"\nERROR    {serverStats.LastError}" : serverStats.LastHint.Length > 0 ? $"\nHINT     {serverStats.LastHint}" : "";
+    var summary = SummaryFor(p.Name);
     var backend = string.IsNullOrWhiteSpace(capability.Backend) ? "unknown" : capability.Backend;
-    var gpuName = string.IsNullOrWhiteSpace(capability.GpuName) ? "unknown" : capability.GpuName;
-    var compute = string.IsNullOrWhiteSpace(capability.ComputeCapability) ? "unknown" : capability.ComputeCapability;
-    var removed = plan.RemovedArguments.Count == 0 ? "" : $"\nFILTER   removed {string.Join(", ", plan.RemovedArguments.Select(x => x.OptionName).Distinct(StringComparer.Ordinal))}";
-    var probe = string.IsNullOrWhiteSpace(capability.ProbeMessage) ? "" : $"\nPROBE    {capability.ProbeMessage}";
-    status.Text = $"STATE    {state}{pid}{uptime}     PROFILE  {p.Name}     BIND  {p.Host}:{p.Port}\n" +
-                  $"MODEL    {model}\n" +
-                  $"DETAIL   ctx {p.Ctx:N0}  gpu layers {p.Ngl}  parallel {p.Parallel}  flash-attn {p.FlashAttn}\n" +
-                  $"GPU      {gpu.Summary}\n" +
-                  $"SERVER   backend {backend}  gpu {gpuName}  cc {compute}\n" +
-                  $"BUILD    llama.cpp {capability.BuildSummary}  compatibility {capability.CompatibilityMode}\n" +
-                  $"METRIC   prompt {serverStats.PromptTokensPerSecond:F2} tok/s  gen {serverStats.EvalTokensPerSecond:F2} tok/s  gen 3s {serverStats.GenerationTokensPerSecond3s:F2} tok/s  tokens {serverStats.GeneratedTokens}  offload {serverStats.OffloadedLayers}/{serverStats.TotalLayers}  progress {serverStats.Progress:P0}\n" +
-                  $"ABOUT    {description}" + history + removed + probe + issue + (string.IsNullOrWhiteSpace(message) ? "" : $"\nINFO     {message}");
+    var device = gpu.IsExplicit ? gpu.Summary : "Automatic";
+    var server = $"{backend} backend  ·  llama.cpp {capability.BuildSummary}";
+    if (!string.IsNullOrWhiteSpace(capability.GpuName)) server += $"  ·  {capability.GpuName}";
+    var vision = p.Vision ? $"On  ·  {Path.GetFileName(p.Mmproj)}" : "Off";
+    var lastRun = summary?.LastRunAt is { } last
+        ? $"{(summary.LastExitCode == 0 ? "Success" : $"Failed (exit {summary.LastExitCode})")}  ·  {UiText.RelativeTime(last, DateTimeOffset.Now)}" +
+          (summary.Generation.Latest > 0 ? $"  ·  {summary.Generation.Latest:F1} tok/s" : "")
+        : "No runs recorded";
+    var lines = new List<string>
+    {
+        $"{state}{pid}{uptime}  ·  {p.Name}  ·  {p.Host}:{p.Port}",
+        $"Model     {model}{(modelSize.Length == 0 ? "" : $"  ·  {modelSize}")}",
+        $"Launch    ctx {p.Ctx:N0}  ·  GPU layers {p.Ngl}  ·  parallel {p.Parallel}  ·  FA {p.FlashAttn}",
+        $"Vision    {vision}",
+        $"Device    {device}",
+        $"Server    {server}",
+        $"Last run  {lastRun}"
+    };
+    var notice = serverStats.LastError.Length > 0 ? $"Error     {serverStats.LastError}"
+        : serverStats.LastHint.Length > 0 ? $"Hint      {serverStats.LastHint}"
+        : plan.RemovedArguments.Count > 0 ? $"Warning   Unsupported options removed: {string.Join(", ", plan.RemovedArguments.Select(x => x.OptionName).Distinct(StringComparer.Ordinal))}"
+        : !string.IsNullOrWhiteSpace(message) ? $"Info      {message}"
+        : runner.IsActive ? $"Metrics   prompt {serverStats.PromptTokensPerSecond:F1}  ·  gen {serverStats.EvalTokensPerSecond:F1} tok/s  ·  tokens {serverStats.GeneratedTokens}  ·  offload {serverStats.OffloadedLayers}/{serverStats.TotalLayers}"
+        : "Ready     Enter start  ·  e edit  ·  v preview command";
+    lines.Add(notice);
+    status.Text = string.Join('\n', lines);
 }
 
 void RefreshLogs()
 {
-    logView.Text = logLines.Count == 0 ? "Waiting for server output…" : string.Join('\n', logLines);
+    var showingLogs = runner.IsActive || externalServer is not null || logLines.Count > 0;
+    logFrame.Title = showingLogs ? " Live log " : " Profile overview ";
+    logView.Text = showingLogs
+        ? logLines.Count == 0 ? "Starting server; waiting for output…" : string.Join('\n', logLines)
+        : FormatProfileOverview(SelectedProfile());
     if (logAutoScroll) logView.MoveEnd();
     else logView.ScrollTo(new System.Drawing.Point(0, Math.Clamp(logScrollRow, 0, Math.Max(0, logLines.Count - 1))));
+}
+
+string FormatProfileOverview(Profile? profile)
+{
+    if (profile is null) return "No profile selected.\n\nPress n to create one or F5 to find local models.";
+    var name = Path.GetFileName(profile.Model);
+    var size = ModelSize(profile.Model);
+    var architecture = "unknown";
+    var metadataName = "";
+    try
+    {
+        var metadata = GgufMetadataReader.Read(profile.Model);
+        architecture = metadata.String("general.architecture") ?? architecture;
+        metadataName = metadata.String("general.name") ?? "";
+    }
+    catch { }
+    var vision = profile.Vision
+        ? $"Enabled\nProjector     {Path.GetFileName(profile.Mmproj)}"
+        : "Disabled";
+    return $"Ready to launch\n\n" +
+           $"Enter  Start server     e  Edit profile     v  Preview command\n\n" +
+           $"Model\n" +
+           $"File          {name}\n" +
+           $"Size          {(size.Length == 0 ? "unavailable" : size)}\n" +
+           $"Architecture  {architecture}\n" +
+           (metadataName.Length == 0 ? "" : $"Identity      {metadataName}\n") +
+           $"Context       {profile.Ctx:N0}\n" +
+           $"GPU layers    {profile.Ngl}\n\n" +
+           $"Vision        {vision}";
 }
 
 void SaveActiveRun(ServerExit exit)
@@ -181,6 +233,7 @@ void ReloadProfiles(string? selectName = null, string message = "Profiles reload
     profiles = result.Profiles;
     historySummaries.Clear();
     RefreshProfileItems(selectName);
+    RefreshLogs();
     var suffix = result.Errors.Count == 0 ? message : $"{message}  Skipped: {string.Join(" | ", result.Errors)}";
     UpdateStatus(suffix);
 }
@@ -304,18 +357,19 @@ runner.LineReceived += line => app.Invoke(() =>
     if (logLines.Count > 500) logLines.RemoveAt(0);
     RefreshLogs(); UpdateStatus();
 });
-runner.StateChanged += _ => app.Invoke(() => { RefreshProfileItems(runningProfile); UpdateStatus(); });
+runner.StateChanged += _ => app.Invoke(() => { RefreshProfileItems(runningProfile); RefreshLogs(); UpdateStatus(); });
 runner.Exited += exit => app.Invoke(() =>
 {
-    var name = runningProfile; runningProfile = ""; RefreshProfileItems(name);
+    var name = runningProfile; runningProfile = "";
     try { SaveActiveRun(exit); }
     catch (Exception ex) { UpdateStatus($"Could not save run history: {ex.Message}"); }
+    RefreshProfileItems(name); RefreshLogs();
     UpdateStatus(exit.Requested ? $"Server stopped (exit {exit.ExitCode})." : $"Server exited with code {exit.ExitCode}." + (exit.Error is null ? "" : $" {exit.Error}"));
 });
 profileList.ValueChanged += (_, _) =>
 {
     if (profileList.SelectedItem is int value && profiles.Count > 0) selected = Math.Clamp(value, 0, profiles.Count - 1);
-    UpdateStatus();
+    RefreshLogs(); UpdateStatus();
 };
 
 app.Keyboard.KeyDown += (_, key) =>
@@ -372,6 +426,7 @@ app.Keyboard.KeyDown += (_, key) =>
 };
 
 RefreshProfileItems();
+RefreshLogs();
 UpdateStatus(load.Errors.Count == 0 ? cfg.LoadMessage : $"Skipped invalid profiles: {string.Join(" | ", load.Errors)}");
 _ = Task.Run(async () =>
 {
@@ -508,13 +563,6 @@ static bool EditProfile(IApplication app, Profile profile, string title)
 
 static int ParseInt(string value, string name) => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : throw new FormatException($"{name} must be a whole number.");
 static double ParseDouble(string value, string name) => double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : throw new FormatException($"{name} must be a number.");
-static bool HasRun(string directory, string profile) { try { return RunHistory.ForProfile(directory, profile).Count > 0; } catch { return false; } }
-static string FitInline(string value, int width)
-{
-    if (width <= 0 || value.Length <= width) return value;
-    if (width <= 3) return value[..width];
-    return value[..(width - 3)] + "...";
-}
 static string CompactModelSize(string path)
 {
     var size = ModelSize(path);

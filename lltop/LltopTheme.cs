@@ -22,6 +22,7 @@ internal static class LltopTheme
         Label banner,
         ListView profileList,
         LogTextView logView,
+        Label status,
         Label help)
     {
         var normal = profileList.GetScheme().Normal;
@@ -40,6 +41,7 @@ internal static class LltopTheme
         // which is the contrasting olive background seen in the old log panel.
         Override(logView, _ => normal);
         logView.PanelAttribute = normal;
+        Override(status, _ => normal);
     }
 
     private static void Override(View view, Func<VisualRole, TuiAttribute> attributeForRole)

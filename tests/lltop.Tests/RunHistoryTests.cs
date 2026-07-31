@@ -14,6 +14,8 @@ public sealed class RunHistoryTests : IDisposable
         var summary = RunHistory.Summarize(dir, "qwen");
         Assert.Equal(1, summary.RunCount);
         Assert.Equal(100, summary.Generation.Latest);
+        Assert.Equal(0, summary.LastExitCode);
+        Assert.NotNull(summary.LastRunAt);
         Assert.NotEmpty(RunHistory.Sparkline(summary.Generation.Series));
         Assert.Contains("\"model\"", File.ReadAllText(Directory.GetFiles(dir, "*.json").Single()));
     }
