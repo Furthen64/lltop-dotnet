@@ -12,6 +12,7 @@ public sealed class ProfileStoreTests : IDisposable
         {
             Name = "Qwen Coding", Model = "/models/qwen.gguf", CacheK = "q8_0", CacheV = "f16",
             TopP = .83, MinP = .02, UBatch = 128, FlashAttn = "on", NoMmap = false,
+            RepeatPenalty = 1.15, RepeatLastN = 128, PresencePenalty = .2, FrequencyPenalty = .3,
             ReasoningBudget = 2048, ExtraArgs = ["--verbose", "--log-colors", "value with spaces"]
         };
 
@@ -24,6 +25,10 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.Equal("f16", loaded.CacheV);
         Assert.Equal(.83, loaded.TopP);
         Assert.Equal(.02, loaded.MinP);
+        Assert.Equal(1.15, loaded.RepeatPenalty);
+        Assert.Equal(128, loaded.RepeatLastN);
+        Assert.Equal(.2, loaded.PresencePenalty);
+        Assert.Equal(.3, loaded.FrequencyPenalty);
         Assert.Equal(128, loaded.UBatch);
         Assert.Equal("on", loaded.FlashAttn);
         Assert.False(loaded.NoMmap);

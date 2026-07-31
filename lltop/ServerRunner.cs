@@ -200,6 +200,10 @@ sealed class ServerRunner : IDisposable
         segments.Add(new(["--top-p", F(p.TopP)], LaunchArgumentOrigin.Generated, "top P"));
         segments.Add(new(["--top-k", p.TopK.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "top K"));
         segments.Add(new(["--min-p", F(p.MinP)], LaunchArgumentOrigin.Generated, "min P"));
+        segments.Add(new(["--repeat-penalty", F(p.RepeatPenalty)], LaunchArgumentOrigin.Generated, "repeat penalty"));
+        segments.Add(new(["--repeat-last-n", p.RepeatLastN.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "repeat last N"));
+        segments.Add(new(["--presence-penalty", F(p.PresencePenalty)], LaunchArgumentOrigin.Generated, "presence penalty"));
+        segments.Add(new(["--frequency-penalty", F(p.FrequencyPenalty)], LaunchArgumentOrigin.Generated, "frequency penalty"));
         segments.Add(new(["-b", p.Batch.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "batch"));
         segments.Add(new(["-ub", p.UBatch.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "micro batch"));
         segments.Add(new(["--parallel", p.Parallel.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "parallel"));

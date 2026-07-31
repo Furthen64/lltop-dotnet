@@ -18,6 +18,10 @@ sealed class Profile
     public double TopP { get; set; } = .95;
     public int TopK { get; set; } = 40;
     public double MinP { get; set; } = .05;
+    public double RepeatPenalty { get; set; } = 1;
+    public int RepeatLastN { get; set; } = 64;
+    public double PresencePenalty { get; set; }
+    public double FrequencyPenalty { get; set; }
     public int Batch { get; set; } = 512;
     public int UBatch { get; set; } = 256;
     public int Parallel { get; set; } = 1;
@@ -45,7 +49,9 @@ sealed class Profile
         Name = name, Description = Description, LlamaServer = LlamaServer, Model = Model,
         Host = Host, Port = Port, Alias = Alias, Ctx = Ctx, Ngl = Ngl,
         CacheK = CacheK, CacheV = CacheV, Temp = Temp, TopP = TopP, TopK = TopK,
-        MinP = MinP, Batch = Batch, UBatch = UBatch, Parallel = Parallel, Threads = Threads,
+        MinP = MinP, RepeatPenalty = RepeatPenalty, RepeatLastN = RepeatLastN,
+        PresencePenalty = PresencePenalty, FrequencyPenalty = FrequencyPenalty,
+        Batch = Batch, UBatch = UBatch, Parallel = Parallel, Threads = Threads,
         FlashAttn = FlashAttn, Jinja = Jinja, Metrics = Metrics, NoMmap = NoMmap,
         ChatTemplate = ChatTemplate, Reasoning = Reasoning, ReasoningBudget = ReasoningBudget,
         ExtraArgs = [.. ExtraArgs], SourcePath = SourcePath
@@ -60,6 +66,8 @@ sealed class Profile
         if (!new[] { "", "auto", "on", "off" }.Contains(Reasoning, StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException("Reasoning must be auto, on, or off.");
         if (ReasoningBudget < -1) throw new InvalidOperationException("Reasoning budget must be -1 or greater.");
+        if (RepeatPenalty < 0) throw new InvalidOperationException("Repeat penalty cannot be negative.");
+        if (RepeatLastN < -1) throw new InvalidOperationException("Repeat last N must be -1 or greater.");
         if (!forLaunch) return;
         var server = string.IsNullOrWhiteSpace(LlamaServer) ? cfg?.LlamaServer : LlamaServer;
         if (string.IsNullOrWhiteSpace(server)) throw new InvalidOperationException("llama-server path is required.");
@@ -152,6 +160,8 @@ sealed class ProfileStore(string directory)
         S("model", p.Model); S("host", p.Host); I("port", p.Port); S("alias", p.Alias);
         I("ctx", p.Ctx); I("ngl", p.Ngl); S("cache_k", p.CacheK); S("cache_v", p.CacheV);
         D("temp", p.Temp); D("top_p", p.TopP); I("top_k", p.TopK); D("min_p", p.MinP);
+        D("repeat_penalty", p.RepeatPenalty); I("repeat_last_n", p.RepeatLastN);
+        D("presence_penalty", p.PresencePenalty); D("frequency_penalty", p.FrequencyPenalty);
         I("batch", p.Batch); I("ubatch", p.UBatch); I("parallel", p.Parallel); I("threads", p.Threads);
         S("flash_attn", p.FlashAttn); B("jinja", p.Jinja); B("metrics", p.Metrics); B("no_mmap", p.NoMmap);
         S("chat_template", p.ChatTemplate); S("reasoning", p.Reasoning); I("reasoning_budget", p.ReasoningBudget);

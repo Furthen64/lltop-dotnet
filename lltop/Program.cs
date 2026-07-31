@@ -423,7 +423,7 @@ runner.Dispose();
 
 static bool EditProfile(IApplication app, Profile profile, string title)
 {
-    var dialog = new Window { Title = $" {title} ", Width = 96, Height = 45 };
+    var dialog = new Window { Title = $" {title} ", Width = 96, Height = 51 };
     var fields = new Dictionary<string, TextField>();
     TextField Field(string label, string value, int y, int x = 2, int width = 42)
     {
@@ -443,16 +443,18 @@ static bool EditProfile(IApplication app, Profile profile, string title)
     Field("Cache K", profile.CacheK, 22); Field("Cache V", profile.CacheV, 22, 49);
     Field("Temperature", profile.Temp.ToString(CultureInfo.InvariantCulture), 25); Field("Top P", profile.TopP.ToString(CultureInfo.InvariantCulture), 25, 49);
     Field("Top K", profile.TopK.ToString(), 28); Field("Min P", profile.MinP.ToString(CultureInfo.InvariantCulture), 28, 49);
-    Field("Batch", profile.Batch.ToString(), 31); Field("Micro batch", profile.UBatch.ToString(), 31, 49);
-    Field("Chat template", profile.ChatTemplate, 34); Field("Reasoning / budget", $"{profile.Reasoning} {profile.ReasoningBudget}", 34, 49);
-    Field("Extra args (quoted when needed)", ArgumentText.Format(profile.ExtraArgs), 37, 2, 90);
-    var jinja = new CheckBox { X = 2, Y = 40, Text = "Jinja", Value = profile.Jinja ? CheckState.Checked : CheckState.UnChecked };
-    var metrics = new CheckBox { X = 20, Y = 40, Text = "Metrics", Value = profile.Metrics ? CheckState.Checked : CheckState.UnChecked };
-    var mmap = new CheckBox { X = 40, Y = 40, Text = "Disable mmap", Value = profile.NoMmap ? CheckState.Checked : CheckState.UnChecked };
+    Field("Repeat penalty", profile.RepeatPenalty.ToString(CultureInfo.InvariantCulture), 31); Field("Repeat last N", profile.RepeatLastN.ToString(), 31, 49);
+    Field("Presence penalty", profile.PresencePenalty.ToString(CultureInfo.InvariantCulture), 34); Field("Frequency penalty", profile.FrequencyPenalty.ToString(CultureInfo.InvariantCulture), 34, 49);
+    Field("Batch", profile.Batch.ToString(), 37); Field("Micro batch", profile.UBatch.ToString(), 37, 49);
+    Field("Chat template", profile.ChatTemplate, 40); Field("Reasoning / budget", $"{profile.Reasoning} {profile.ReasoningBudget}", 40, 49);
+    Field("Extra args (quoted when needed)", ArgumentText.Format(profile.ExtraArgs), 43, 2, 90);
+    var jinja = new CheckBox { X = 2, Y = 46, Text = "Jinja", Value = profile.Jinja ? CheckState.Checked : CheckState.UnChecked };
+    var metrics = new CheckBox { X = 20, Y = 46, Text = "Metrics", Value = profile.Metrics ? CheckState.Checked : CheckState.UnChecked };
+    var mmap = new CheckBox { X = 40, Y = 46, Text = "Disable mmap", Value = profile.NoMmap ? CheckState.Checked : CheckState.UnChecked };
     dialog.Add(jinja, metrics, mmap);
-    var message = new Label { X = 58, Y = 40, Width = Dim.Fill(2), Text = "Tab moves between fields." };
-    var save = new Button { X = 2, Y = 41, Text = "Save", IsDefault = true };
-    var cancel = new Button { X = Pos.Right(save) + 2, Y = 41, Text = "Cancel" };
+    var message = new Label { X = 58, Y = 46, Width = Dim.Fill(2), Text = "Tab moves between fields." };
+    var save = new Button { X = 2, Y = 47, Text = "Save", IsDefault = true };
+    var cancel = new Button { X = Pos.Right(save) + 2, Y = 47, Text = "Cancel" };
     dialog.Add(message, save, cancel);
     var accepted = false;
     save.Accepting += (_, _) =>
@@ -469,6 +471,8 @@ static bool EditProfile(IApplication app, Profile profile, string title)
             profile.CacheK = T("Cache K").Trim(); profile.CacheV = T("Cache V").Trim();
             profile.Temp = ParseDouble(T("Temperature"), "Temperature"); profile.TopP = ParseDouble(T("Top P"), "Top P");
             profile.TopK = ParseInt(T("Top K"), "Top K"); profile.MinP = ParseDouble(T("Min P"), "Min P");
+            profile.RepeatPenalty = ParseDouble(T("Repeat penalty"), "Repeat penalty"); profile.RepeatLastN = ParseInt(T("Repeat last N"), "Repeat last N");
+            profile.PresencePenalty = ParseDouble(T("Presence penalty"), "Presence penalty"); profile.FrequencyPenalty = ParseDouble(T("Frequency penalty"), "Frequency penalty");
             profile.Batch = ParseInt(T("Batch"), "Batch"); profile.UBatch = ParseInt(T("Micro batch"), "Micro batch");
             profile.ChatTemplate = T("Chat template").Trim();
             var reasoning = T("Reasoning / budget").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
