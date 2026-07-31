@@ -12,6 +12,7 @@ var cfg = AppConfig.Load();
 if (cfg.IsFirstRun && !RunFirstRunWizard(app, cfg)) return;
 
 var store = new ProfileStore(cfg.ProfilesDir);
+var removedLegacyStarter = FirstRunProfiles.RemoveLegacyStarter(cfg);
 var load = store.LoadAll();
 var profiles = load.Profiles;
 var selected = Math.Max(0, profiles.FindIndex(p => p.Name.Equals(cfg.DefaultProfile, StringComparison.OrdinalIgnoreCase)));
@@ -427,7 +428,8 @@ app.Keyboard.KeyDown += (_, key) =>
 
 RefreshProfileItems();
 RefreshLogs();
-UpdateStatus(load.Errors.Count == 0 ? cfg.LoadMessage : $"Skipped invalid profiles: {string.Join(" | ", load.Errors)}");
+var startupMessage = removedLegacyStarter ? "Removed the obsolete empty starter profile." : cfg.LoadMessage;
+UpdateStatus(load.Errors.Count == 0 ? startupMessage : $"Skipped invalid profiles: {string.Join(" | ", load.Errors)}");
 _ = Task.Run(async () =>
 {
     while (!monitorCancellation.IsCancellationRequested)

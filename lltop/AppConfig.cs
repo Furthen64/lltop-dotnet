@@ -5,7 +5,7 @@ sealed class AppConfig
     public string ProfilesDir { get; set; } = Path.Combine(Root, "profiles");
     public string RunsDir { get; set; } = Path.Combine(Root, "runs");
     public string LogsDir { get; set; } = Path.Combine(Root, "logs");
-    public string DefaultProfile { get; set; } = "starter";
+    public string DefaultProfile { get; set; } = "";
     public string Editor { get; set; } = Environment.GetEnvironmentVariable("EDITOR") ?? (OperatingSystem.IsWindows() ? "notepad" : "nano");
     public bool ConfirmRestart { get; set; } = true;
     public bool ConfirmRecentFailure { get; set; } = true;

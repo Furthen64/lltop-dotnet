@@ -10,6 +10,7 @@ public sealed class FirstRunProfilesTests : IDisposable
         Write("top.gguf");
         Write("one/two/model.BIN");
         Write("one/two/three/too-deep.gguf");
+        Write("mmproj-BF16.gguf");
         Write("ignore.txt");
 
         var models = FirstRunProfiles.DiscoverModels(root);
@@ -17,6 +18,22 @@ public sealed class FirstRunProfilesTests : IDisposable
         Assert.Equal(2, models.Count);
         Assert.Contains(Path.Combine(root, "top.gguf"), models);
         Assert.Contains(Path.Combine(root, "one/two/model.BIN"), models);
+    }
+
+    [Fact]
+    public void DiscoverModels_RespectsRootLlmIgnorePatterns()
+    {
+        Write("keep.gguf");
+        Write("archive/old.gguf");
+        Write("experiments/drop.gguf");
+        Write("experiments/keep.gguf");
+        Write("scratch/drop.gguf");
+        Write("scratch/nested/drop.gguf");
+        File.WriteAllText(Path.Combine(root, ".llmignore"), "# local exclusions\narchive/\nexperiments/*.gguf\n!experiments/keep.gguf\nscratch/**/*.gguf\n");
+
+        var models = FirstRunProfiles.DiscoverModels(root);
+
+        Assert.Equal([Path.Combine(root, "experiments/keep.gguf"), Path.Combine(root, "keep.gguf")], models);
     }
 
     [Theory]
@@ -49,7 +66,7 @@ public sealed class FirstRunProfilesTests : IDisposable
     }
 
     [Fact]
-    public void Generate_CreatesStarterAndUniqueProfilesWithSelectedDefaults()
+    public void Generate_CreatesUniqueProfilesWithoutAnEmptyStarter()
     {
         var cfg = Config();
         Directory.CreateDirectory(cfg.ProfilesDir);
@@ -65,7 +82,7 @@ public sealed class FirstRunProfilesTests : IDisposable
         Assert.Equal(2, result.ModelsFound);
         Assert.Equal(2, result.ProfilesCreated);
         Assert.Empty(loaded.Errors);
-        Assert.Contains(loaded.Profiles, profile => profile.Name == "starter");
+        Assert.DoesNotContain(loaded.Profiles, profile => profile.Name == "starter");
         Assert.Contains(loaded.Profiles, profile => profile.Name == "qwen3-2" && profile.Alias == "qwen");
         Assert.Contains(loaded.Profiles, profile => profile.Name == "other" && profile.Ctx == 4096);
     }
@@ -84,9 +101,22 @@ public sealed class FirstRunProfilesTests : IDisposable
         Assert.Equal(1, first.ProfilesCreated);
         Assert.Equal(2, refresh.ModelsFound);
         Assert.Equal(1, refresh.ProfilesCreated);
-        Assert.Equal(3, loaded.Profiles.Count); // starter plus one profile per model
+        Assert.Equal(2, loaded.Profiles.Count);
         Assert.Contains(loaded.Profiles, profile => profile.Name == "qwen3" && profile.ChatTemplate == "chatml");
         Assert.Contains(loaded.Profiles, profile => profile.Name == "deepseek-v3" && profile.ChatTemplate == "deepseek3");
+    }
+
+    [Fact]
+    public void RemoveLegacyStarter_DeletesOnlyTheOldEmptyGeneratedProfile()
+    {
+        var cfg = Config();
+        Directory.CreateDirectory(cfg.ProfilesDir);
+        var starter = Profile.CreateDefault(cfg, "starter");
+        starter.Description = "Starter profile";
+        new ProfileStore(cfg.ProfilesDir).Save(starter);
+
+        Assert.True(FirstRunProfiles.RemoveLegacyStarter(cfg));
+        Assert.False(File.Exists(Path.Combine(cfg.ProfilesDir, "starter.toml")));
     }
 
     AppConfig Config() => new()

@@ -11,6 +11,7 @@ static class FirstRunProfiles
 
         var root = Path.GetFullPath(modelsDirectory);
         if (!Directory.Exists(root)) throw new DirectoryNotFoundException($"Models directory was not found: {root}");
+        var ignore = ModelIgnore.Load(root);
 
         var models = new List<string>();
         Scan(root, 1);
@@ -23,6 +24,8 @@ static class FirstRunProfiles
             {
                 foreach (var path in Directory.EnumerateFiles(directory))
                 {
+                    if (ignore.IsIgnored(Path.GetRelativePath(root, path), isDirectory: false)) continue;
+                    if (Path.GetFileName(path).StartsWith("mmproj", StringComparison.OrdinalIgnoreCase)) continue;
                     var extension = Path.GetExtension(path);
                     if (extension.Equals(".gguf", StringComparison.OrdinalIgnoreCase) ||
                         extension.Equals(".bin", StringComparison.OrdinalIgnoreCase))
@@ -34,6 +37,7 @@ static class FirstRunProfiles
                 {
                     try
                     {
+                        if (ignore.IsIgnored(Path.GetRelativePath(root, child), isDirectory: true)) continue;
                         if ((File.GetAttributes(child) & FileAttributes.ReparsePoint) == 0) Scan(child, fileDepth + 1);
                     }
                     catch (IOException) { }
@@ -52,7 +56,7 @@ static class FirstRunProfiles
 
         Directory.CreateDirectory(cfg.ProfilesDir);
         var store = new ProfileStore(cfg.ProfilesDir);
-        EnsureStarterProfile(cfg, store);
+        RemoveLegacyStarter(cfg);
 
         var existingSlugs = Directory.EnumerateFiles(cfg.ProfilesDir, "*.toml")
             .Select(Path.GetFileNameWithoutExtension)
@@ -105,13 +109,21 @@ static class FirstRunProfiles
         return profile;
     }
 
-    static void EnsureStarterProfile(AppConfig cfg, ProfileStore store)
+    public static bool RemoveLegacyStarter(AppConfig cfg)
     {
         var path = Path.Combine(cfg.ProfilesDir, "starter.toml");
-        if (File.Exists(path)) return;
-        var starter = Profile.CreateDefault(cfg, "starter");
-        starter.Description = "Starter profile";
-        store.Save(starter);
+        if (!File.Exists(path)) return false;
+        try
+        {
+            var starter = new Profile();
+            Toml.ReadInto(path, starter);
+            if (!starter.Name.Equals("starter", StringComparison.OrdinalIgnoreCase) ||
+                !starter.Description.Equals("Starter profile", StringComparison.Ordinal) ||
+                !string.IsNullOrWhiteSpace(starter.Model)) return false;
+            File.Delete(path);
+            return true;
+        }
+        catch { return false; }
     }
 
     static string UniqueSlug(string baseSlug, HashSet<string> existing)
