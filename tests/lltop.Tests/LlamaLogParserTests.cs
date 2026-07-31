@@ -27,6 +27,23 @@ public sealed class LlamaLogParserTests
     }
 
     [Fact]
+    public void ParsesLiveGenerationThroughput()
+    {
+        const string line = "3.43.918.536 I slot print_timing: id 0 | task 1587 | n_decoded = 399, tg = 19.80 t/s, tg_3s = 19.61 t/s";
+
+        var parsed = LlamaLogParser.Parse(line);
+        var stats = new ServerStats();
+        stats.Consume(line);
+
+        Assert.Equal(399, parsed.DecodedTokens);
+        Assert.Equal(19.80, parsed.GenerationTokensPerSecond);
+        Assert.Equal(19.61, parsed.GenerationTokensPerSecond3s);
+        Assert.Equal(399, stats.GeneratedTokens);
+        Assert.Equal(19.80, stats.EvalTokensPerSecond);
+        Assert.Equal(19.61, stats.GenerationTokensPerSecond3s);
+    }
+
+    [Fact]
     public void HelpfulAutofitWarningIsNotAnError()
     {
         var parsed = LlamaLogParser.Parse("W common_fit_params: failed to fit params to free device memory: n_gpu_layers already set by user to 99, abort.");

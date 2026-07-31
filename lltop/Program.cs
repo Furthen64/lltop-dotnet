@@ -148,7 +148,7 @@ void UpdateStatus(string message = "")
                   $"GPU      {gpu.Summary}\n" +
                   $"SERVER   backend {backend}  gpu {gpuName}  cc {compute}\n" +
                   $"BUILD    llama.cpp {capability.BuildSummary}  compatibility {capability.CompatibilityMode}\n" +
-                  $"METRIC   prompt {serverStats.PromptTokensPerSecond:F2} tok/s  eval {serverStats.EvalTokensPerSecond:F2} tok/s  offload {serverStats.OffloadedLayers}/{serverStats.TotalLayers}  progress {serverStats.Progress:P0}\n" +
+                  $"METRIC   prompt {serverStats.PromptTokensPerSecond:F2} tok/s  gen {serverStats.EvalTokensPerSecond:F2} tok/s  gen 3s {serverStats.GenerationTokensPerSecond3s:F2} tok/s  tokens {serverStats.GeneratedTokens}  offload {serverStats.OffloadedLayers}/{serverStats.TotalLayers}  progress {serverStats.Progress:P0}\n" +
                   $"ABOUT    {description}" + history + removed + probe + issue + (string.IsNullOrWhiteSpace(message) ? "" : $"\nINFO     {message}");
 }
 

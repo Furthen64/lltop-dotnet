@@ -24,7 +24,7 @@ internal static class LogLineStyle
 
         if (lower.Contains("error") || lower.Contains("failed")) return LogLineKind.Error;
         if (lower.Contains("warning") || lower.Contains("warn")) return LogLineKind.Warning;
-        if (lower.Contains("tokens per second")) return LogLineKind.Performance;
+        if (lower.Contains("tokens per second") || (lower.Contains("tg =") && lower.Contains("tg_3s ="))) return LogLineKind.Performance;
         if (lower.Contains("offloaded")) return LogLineKind.Offload;
         if (lower.Contains("progress")) return LogLineKind.Progress;
         return LogLineKind.Normal;
