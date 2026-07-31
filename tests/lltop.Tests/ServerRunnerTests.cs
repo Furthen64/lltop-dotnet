@@ -26,6 +26,34 @@ public sealed class ServerRunnerTests
     }
 
     [Fact]
+    public void BuildArguments_AddsVisionProjectorAndFiltersManualConflict()
+    {
+        var profile = new Profile
+        {
+            Model = "/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
+            Vision = true,
+            Mmproj = "/models/mmproj-BF16.gguf",
+            ExtraArgs = ["--mmproj", "/wrong/projector.gguf"]
+        };
+
+        var args = ServerRunner.BuildArguments(profile).ToList();
+
+        Assert.Equal(1, args.Count(x => x == "--mmproj"));
+        Assert.Equal(profile.Mmproj, args[args.IndexOf("--mmproj") + 1]);
+        Assert.DoesNotContain("/wrong/projector.gguf", args);
+    }
+
+    [Fact]
+    public void Validate_VisionRequiresSupportedQwenFamilyAndProjectorName()
+    {
+        var profile = new Profile { Name = "vision", Model = "/models/qwen.gguf", Vision = true, Mmproj = "/models/mmproj-BF16.gguf" };
+
+        var error = Assert.Throws<InvalidOperationException>(() => profile.Validate());
+
+        Assert.Contains("Qwen3.6-35B-A3B", error.Message);
+    }
+
+    [Fact]
     public void Validate_RejectsInvalidLaunchValues()
     {
         var profile = new Profile { Name = "bad", Port = 70000 };

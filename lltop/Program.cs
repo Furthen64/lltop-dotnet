@@ -423,7 +423,7 @@ runner.Dispose();
 
 static bool EditProfile(IApplication app, Profile profile, string title)
 {
-    var dialog = new Window { Title = $" {title} ", Width = 96, Height = 51 };
+    var dialog = new Window { Title = $" {title} ", Width = 96, Height = 54 };
     var fields = new Dictionary<string, TextField>();
     TextField Field(string label, string value, int y, int x = 2, int width = 42)
     {
@@ -435,34 +435,52 @@ static bool EditProfile(IApplication app, Profile profile, string title)
     var name = Field("Name", profile.Name, 1);
     Field("Description", profile.Description, 1, 49, 43);
     Field("Model path", profile.Model, 4, 2, 90);
-    Field("llama-server override (blank = global)", profile.LlamaServer, 7, 2, 90);
-    Field("Host", profile.Host, 10); Field("Port", profile.Port.ToString(), 10, 49);
-    Field("Context", profile.Ctx.ToString(), 13); Field("GPU layers", profile.Ngl.ToString(), 13, 49);
-    Field("Parallel", profile.Parallel.ToString(), 16); Field("Threads (0 = auto)", profile.Threads.ToString(), 16, 49);
-    Field("Flash attention (auto/on/off)", profile.FlashAttn, 19); Field("Alias", profile.Alias, 19, 49);
-    Field("Cache K", profile.CacheK, 22); Field("Cache V", profile.CacheV, 22, 49);
-    Field("Temperature", profile.Temp.ToString(CultureInfo.InvariantCulture), 25); Field("Top P", profile.TopP.ToString(CultureInfo.InvariantCulture), 25, 49);
-    Field("Top K", profile.TopK.ToString(), 28); Field("Min P", profile.MinP.ToString(CultureInfo.InvariantCulture), 28, 49);
-    Field("Repeat penalty", profile.RepeatPenalty.ToString(CultureInfo.InvariantCulture), 31); Field("Repeat last N", profile.RepeatLastN.ToString(), 31, 49);
-    Field("Presence penalty", profile.PresencePenalty.ToString(CultureInfo.InvariantCulture), 34); Field("Frequency penalty", profile.FrequencyPenalty.ToString(CultureInfo.InvariantCulture), 34, 49);
-    Field("Batch", profile.Batch.ToString(), 37); Field("Micro batch", profile.UBatch.ToString(), 37, 49);
-    Field("Chat template", profile.ChatTemplate, 40); Field("Reasoning / budget", $"{profile.Reasoning} {profile.ReasoningBudget}", 40, 49);
-    Field("Extra args (quoted when needed)", ArgumentText.Format(profile.ExtraArgs), 43, 2, 90);
-    var jinja = new CheckBox { X = 2, Y = 46, Text = "Jinja", Value = profile.Jinja ? CheckState.Checked : CheckState.UnChecked };
-    var metrics = new CheckBox { X = 20, Y = 46, Text = "Metrics", Value = profile.Metrics ? CheckState.Checked : CheckState.UnChecked };
-    var mmap = new CheckBox { X = 40, Y = 46, Text = "Disable mmap", Value = profile.NoMmap ? CheckState.Checked : CheckState.UnChecked };
-    dialog.Add(jinja, metrics, mmap);
-    var message = new Label { X = 58, Y = 46, Width = Dim.Fill(2), Text = "Tab moves between fields." };
-    var save = new Button { X = 2, Y = 47, Text = "Save", IsDefault = true };
-    var cancel = new Button { X = Pos.Right(save) + 2, Y = 47, Text = "Cancel" };
+    var mmproj = Field("Vision projector (mmproj)", profile.Mmproj, 7, 2, 72);
+    var findMmproj = new Button { X = 76, Y = 8, Text = "Find sibling" };
+    dialog.Add(findMmproj);
+    Field("llama-server override (blank = global)", profile.LlamaServer, 10, 2, 90);
+    Field("Host", profile.Host, 13); Field("Port", profile.Port.ToString(), 13, 49);
+    Field("Context", profile.Ctx.ToString(), 16); Field("GPU layers", profile.Ngl.ToString(), 16, 49);
+    Field("Parallel", profile.Parallel.ToString(), 19); Field("Threads (0 = auto)", profile.Threads.ToString(), 19, 49);
+    Field("Flash attention (auto/on/off)", profile.FlashAttn, 22); Field("Alias", profile.Alias, 22, 49);
+    Field("Cache K", profile.CacheK, 25); Field("Cache V", profile.CacheV, 25, 49);
+    Field("Temperature", profile.Temp.ToString(CultureInfo.InvariantCulture), 28); Field("Top P", profile.TopP.ToString(CultureInfo.InvariantCulture), 28, 49);
+    Field("Top K", profile.TopK.ToString(), 31); Field("Min P", profile.MinP.ToString(CultureInfo.InvariantCulture), 31, 49);
+    Field("Repeat penalty", profile.RepeatPenalty.ToString(CultureInfo.InvariantCulture), 34); Field("Repeat last N", profile.RepeatLastN.ToString(), 34, 49);
+    Field("Presence penalty", profile.PresencePenalty.ToString(CultureInfo.InvariantCulture), 37); Field("Frequency penalty", profile.FrequencyPenalty.ToString(CultureInfo.InvariantCulture), 37, 49);
+    Field("Batch", profile.Batch.ToString(), 40); Field("Micro batch", profile.UBatch.ToString(), 40, 49);
+    Field("Chat template", profile.ChatTemplate, 43); Field("Reasoning / budget", $"{profile.Reasoning} {profile.ReasoningBudget}", 43, 49);
+    Field("Extra args (quoted when needed)", ArgumentText.Format(profile.ExtraArgs), 46, 2, 90);
+    var vision = new CheckBox { X = 2, Y = 49, Text = "Use vision", Value = profile.Vision ? CheckState.Checked : CheckState.UnChecked };
+    var jinja = new CheckBox { X = 20, Y = 49, Text = "Jinja", Value = profile.Jinja ? CheckState.Checked : CheckState.UnChecked };
+    var metrics = new CheckBox { X = 36, Y = 49, Text = "Metrics", Value = profile.Metrics ? CheckState.Checked : CheckState.UnChecked };
+    var mmap = new CheckBox { X = 52, Y = 49, Text = "Disable mmap", Value = profile.NoMmap ? CheckState.Checked : CheckState.UnChecked };
+    dialog.Add(vision, jinja, metrics, mmap);
+    var message = new Label { X = 2, Y = 50, Width = 65, Text = "Vision: Qwen3.6-35B-A3B + matching mmproj-BF16.gguf." };
+    var save = new Button { X = 68, Y = 50, Text = "Save", IsDefault = true };
+    var cancel = new Button { X = Pos.Right(save) + 1, Y = 50, Text = "Cancel" };
     dialog.Add(message, save, cancel);
     var accepted = false;
+    findMmproj.Accepting += (_, _) =>
+    {
+        var match = VisionProjectorResolver.FindBeside(AppConfig.Expand(T("Model path")));
+        if (match.Path is not null) mmproj.Text = match.Path;
+        message.Text = match.Message;
+    };
     save.Accepting += (_, _) =>
     {
         try
         {
             profile.Name = name.Text.Trim(); profile.Description = T("Description").Trim();
             profile.Model = AppConfig.Expand(T("Model path"));
+            profile.Vision = vision.Value == CheckState.Checked;
+            profile.Mmproj = AppConfig.Expand(T("Vision projector (mmproj)"));
+            if (profile.Vision && string.IsNullOrWhiteSpace(profile.Mmproj))
+            {
+                var match = VisionProjectorResolver.FindBeside(profile.Model);
+                if (match.Path is null) throw new InvalidOperationException(match.Message);
+                profile.Mmproj = match.Path;
+            }
             profile.LlamaServer = AppConfig.Expand(T("llama-server override (blank = global)"));
             profile.Host = T("Host").Trim(); profile.Port = ParseInt(T("Port"), "Port");
             profile.Ctx = ParseInt(T("Context"), "Context"); profile.Ngl = ParseInt(T("GPU layers"), "GPU layers");

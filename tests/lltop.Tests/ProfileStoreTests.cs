@@ -10,8 +10,9 @@ public sealed class ProfileStoreTests : IDisposable
         var store = new ProfileStore(directory);
         var original = new Profile
         {
-            Name = "Qwen Coding", Model = "/models/qwen.gguf", CacheK = "q8_0", CacheV = "f16",
+            Name = "Qwen Coding", Model = "/models/Qwen3.6-35B-A3B-Q4.gguf", CacheK = "q8_0", CacheV = "f16",
             TopP = .83, MinP = .02, UBatch = 128, FlashAttn = "on", NoMmap = false,
+            Vision = true, Mmproj = "/models/mmproj-BF16.gguf",
             RepeatPenalty = 1.15, RepeatLastN = 128, PresencePenalty = .2, FrequencyPenalty = .3,
             ReasoningBudget = 2048, ExtraArgs = ["--verbose", "--log-colors", "value with spaces"]
         };
@@ -32,6 +33,8 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.Equal(128, loaded.UBatch);
         Assert.Equal("on", loaded.FlashAttn);
         Assert.False(loaded.NoMmap);
+        Assert.True(loaded.Vision);
+        Assert.Equal(original.Mmproj, loaded.Mmproj);
         Assert.Equal(2048, loaded.ReasoningBudget);
         Assert.Equal(original.ExtraArgs, loaded.ExtraArgs);
     }

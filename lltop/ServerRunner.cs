@@ -188,6 +188,7 @@ sealed class ServerRunner : IDisposable
         }
 
         segments.Add(new(["-m", p.Model], LaunchArgumentOrigin.Generated, "model"));
+        if (p.Vision) Pair("--mmproj", p.Mmproj, "vision projector");
         segments.Add(new(["--port", p.Port.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "port"));
         Pair("--host", p.Host, "host");
         Pair("-a", p.Alias, "alias");
@@ -225,6 +226,8 @@ sealed class ServerRunner : IDisposable
             var value = args[i];
             if (value is "-fa" or "--flash-attn") { if (i + 1 < args.Count && !args[i + 1].StartsWith('-')) i++; continue; }
             if (value.StartsWith("--flash-attn=") || value.StartsWith("-fa=")) continue;
+            if (value == "--mmproj") { if (i + 1 < args.Count) i++; continue; }
+            if (value.StartsWith("--mmproj=")) continue;
             yield return value;
         }
     }

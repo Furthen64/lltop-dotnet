@@ -7,6 +7,8 @@ sealed class Profile
     public string Description { get; set; } = "";
     public string LlamaServer { get; set; } = "";
     public string Model { get; set; } = "";
+    public bool Vision { get; set; }
+    public string Mmproj { get; set; } = "";
     public string Host { get; set; } = "0.0.0.0";
     public int Port { get; set; } = 8080;
     public string Alias { get; set; } = "";
@@ -47,6 +49,7 @@ sealed class Profile
     public Profile Copy(string name) => new()
     {
         Name = name, Description = Description, LlamaServer = LlamaServer, Model = Model,
+        Vision = Vision, Mmproj = Mmproj,
         Host = Host, Port = Port, Alias = Alias, Ctx = Ctx, Ngl = Ngl,
         CacheK = CacheK, CacheV = CacheV, Temp = Temp, TopP = TopP, TopK = TopK,
         MinP = MinP, RepeatPenalty = RepeatPenalty, RepeatLastN = RepeatLastN,
@@ -68,12 +71,25 @@ sealed class Profile
         if (ReasoningBudget < -1) throw new InvalidOperationException("Reasoning budget must be -1 or greater.");
         if (RepeatPenalty < 0) throw new InvalidOperationException("Repeat penalty cannot be negative.");
         if (RepeatLastN < -1) throw new InvalidOperationException("Repeat last N must be -1 or greater.");
+        if (Vision)
+        {
+            if (string.IsNullOrWhiteSpace(Mmproj))
+                throw new InvalidOperationException("Vision requires an mmproj path.");
+            var modelName = Path.GetFileName(Model);
+            var normalizedModelName = modelName.Replace('_', '-');
+            if (!normalizedModelName.Contains("qwen3.6", StringComparison.OrdinalIgnoreCase) ||
+                !normalizedModelName.Contains("35b-a3b", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Vision currently supports only Qwen3.6-35B-A3B model GGUFs.");
+            if (!Path.GetFileName(Mmproj).Equals("mmproj-BF16.gguf", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Qwen3.6 vision requires mmproj-BF16.gguf from the same model family.");
+        }
         if (!forLaunch) return;
         var server = string.IsNullOrWhiteSpace(LlamaServer) ? cfg?.LlamaServer : LlamaServer;
         if (string.IsNullOrWhiteSpace(server)) throw new InvalidOperationException("llama-server path is required.");
         if (!File.Exists(server)) throw new FileNotFoundException("llama-server was not found.", server);
         if (string.IsNullOrWhiteSpace(Model)) throw new InvalidOperationException("Model path is required.");
         if (!File.Exists(Model)) throw new FileNotFoundException("Model was not found.", Model);
+        if (Vision && !File.Exists(Mmproj)) throw new FileNotFoundException("Vision projector was not found.", Mmproj);
         if (Ctx <= 0 || Batch <= 0 || UBatch <= 0 || Parallel <= 0)
             throw new InvalidOperationException("Context, batch, micro-batch, and parallel values must be greater than zero.");
         if (Ngl < 0) throw new InvalidOperationException("GPU layers cannot be negative.");
@@ -97,6 +113,7 @@ sealed class ProfileStore(string directory)
                 Toml.ReadInto(path, profile);
                 if (string.IsNullOrWhiteSpace(profile.Name)) profile.Name = Path.GetFileNameWithoutExtension(path);
                 profile.Model = AppConfig.Expand(profile.Model);
+                profile.Mmproj = AppConfig.Expand(profile.Mmproj);
                 profile.LlamaServer = AppConfig.Expand(profile.LlamaServer);
                 profile.SourcePath = path;
                 profile.Validate();
@@ -157,7 +174,8 @@ sealed class ProfileStore(string directory)
         void B(string key, bool value) => b.Append(key).Append(" = ").AppendLine(value ? "true" : "false");
         S("name", p.Name); S("description", p.Description);
         if (!string.IsNullOrWhiteSpace(p.LlamaServer)) S("llama_server", p.LlamaServer);
-        S("model", p.Model); S("host", p.Host); I("port", p.Port); S("alias", p.Alias);
+        S("model", p.Model); B("vision", p.Vision); S("mmproj", p.Mmproj);
+        S("host", p.Host); I("port", p.Port); S("alias", p.Alias);
         I("ctx", p.Ctx); I("ngl", p.Ngl); S("cache_k", p.CacheK); S("cache_v", p.CacheV);
         D("temp", p.Temp); D("top_p", p.TopP); I("top_k", p.TopK); D("min_p", p.MinP);
         D("repeat_penalty", p.RepeatPenalty); I("repeat_last_n", p.RepeatLastN);
