@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 internal sealed record SystemResourceSnapshot
 {
@@ -20,24 +21,24 @@ internal interface ISystemResourceProvider
 }
 
 internal readonly record struct CpuTimes(long Idle, long Total);
-internal readonly record struct GpuResourceMetrics(double UsagePercent, long VramUsedBytes, long VramTotalBytes, string Name);
+internal readonly record struct GpuResourceMetrics(double? UsagePercent, long VramUsedBytes, long VramTotalBytes, string Name);
 
 internal sealed class LinuxSystemResourceProvider : ISystemResourceProvider
 {
     private readonly Func<(string Backend, string Name)> gpuDescription;
     private readonly Func<int> runningServerCount;
-    private readonly Func<CancellationToken, Task<GpuResourceMetrics?>> readNvidiaMetricsAsync;
+    private readonly Func<CancellationToken, Task<GpuResourceMetrics?>> readGpuMetricsAsync;
     private readonly object cpuGate = new();
     private CpuTimes? previousCpuTimes;
 
     public LinuxSystemResourceProvider(
         Func<(string Backend, string Name)> gpuDescription,
         Func<int> runningServerCount,
-        Func<CancellationToken, Task<GpuResourceMetrics?>>? readNvidiaMetricsAsync = null)
+        Func<CancellationToken, Task<GpuResourceMetrics?>>? readGpuMetricsAsync = null)
     {
         this.gpuDescription = gpuDescription;
         this.runningServerCount = runningServerCount;
-        this.readNvidiaMetricsAsync = readNvidiaMetricsAsync ?? ReadNvidiaMetricsAsync;
+        this.readGpuMetricsAsync = readGpuMetricsAsync ?? ReadGpuMetricsAsync;
     }
 
     public async Task<SystemResourceSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
@@ -46,7 +47,7 @@ internal sealed class LinuxSystemResourceProvider : ISystemResourceProvider
         var description = gpuDescription();
         // Hardware telemetry must not depend on the selected server/profile probe.
         // That probe can still be pending (or unavailable) even when nvidia-smi works.
-        var gpu = await readNvidiaMetricsAsync(cancellationToken);
+        var gpu = await readGpuMetricsAsync(cancellationToken);
 
         return new SystemResourceSnapshot
         {
@@ -117,7 +118,48 @@ internal sealed class LinuxSystemResourceProvider : ISystemResourceProvider
             : null;
     }
 
+    private static async Task<GpuResourceMetrics?> ReadGpuMetricsAsync(CancellationToken cancellationToken)
+    {
+        var intel = await ReadXpuSmiMetricsAsync(cancellationToken);
+        return intel ?? await ReadNvidiaMetricsAsync(cancellationToken);
+    }
+
+    private static async Task<GpuResourceMetrics?> ReadXpuSmiMetricsAsync(CancellationToken cancellationToken)
+    {
+        var output = await RunCommandAsync("xpu-smi", "stats -d 0", cancellationToken);
+        return output is null ? null : ParseXpuSmiMetrics(output);
+    }
+
+    // xpu-smi reports memory used and percentage, but not a separate total in its
+    // human-readable stats output. Infer the usable device-memory total from them.
+    internal static GpuResourceMetrics? ParseXpuSmiMetrics(string output)
+    {
+        var name = Regex.Match(output, @"Device Name:\s*(.+)");
+        var used = Regex.Match(output, @"GPU Memory Used \(MiB\)\s+Tile \d+:\s+(?:avg:\s*)?(\d+)");
+        var utilization = Regex.Match(output, @"GPU Memory Util \(%\)\s+Tile \d+:\s+(?:avg:\s*)?(\d+)");
+        if (!used.Success || !utilization.Success ||
+            !long.TryParse(used.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var usedMiB) ||
+            !double.TryParse(utilization.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var memoryPercent) ||
+            memoryPercent is <= 0 or > 100) return null;
+
+        var totalMiB = (long)Math.Round(usedMiB * 100d / memoryPercent, MidpointRounding.AwayFromZero);
+        return new GpuResourceMetrics(null, usedMiB * 1024L * 1024L, totalMiB * 1024L * 1024L,
+            name.Success ? name.Groups[1].Value.Trim() : "Intel GPU");
+    }
+
     private static async Task<GpuResourceMetrics?> ReadNvidiaMetricsAsync(CancellationToken cancellationToken)
+    {
+        var output = await RunCommandAsync("nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total,name --format=csv,noheader,nounits", cancellationToken);
+        if (string.IsNullOrWhiteSpace(output)) return null;
+        var fields = output.Split(',', 4, StringSplitOptions.TrimEntries);
+        if (fields.Length != 4 ||
+            !double.TryParse(fields[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var utilization) ||
+            !long.TryParse(fields[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var usedMiB) ||
+            !long.TryParse(fields[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var totalMiB)) return null;
+        return new GpuResourceMetrics(Math.Clamp(utilization, 0, 100), usedMiB * 1024L * 1024L, totalMiB * 1024L * 1024L, fields[3]);
+    }
+
+    private static async Task<string?> RunCommandAsync(string fileName, string arguments, CancellationToken cancellationToken)
     {
         Process? process = null;
         try
@@ -126,8 +168,8 @@ internal sealed class LinuxSystemResourceProvider : ISystemResourceProvider
             {
                 StartInfo = new ProcessStartInfo
                 {
-                    FileName = "nvidia-smi",
-                    Arguments = "--query-gpu=utilization.gpu,memory.used,memory.total,name --format=csv,noheader,nounits",
+                    FileName = fileName,
+                    Arguments = arguments,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -135,18 +177,12 @@ internal sealed class LinuxSystemResourceProvider : ISystemResourceProvider
                 }
             };
             if (!process.Start()) return null;
-            var outputTask = process.StandardOutput.ReadLineAsync(cancellationToken).AsTask();
+            var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(2));
             await process.WaitForExitAsync(timeout.Token);
-            var line = await outputTask;
-            if (process.ExitCode != 0 || string.IsNullOrWhiteSpace(line)) return null;
-            var fields = line.Split(',', 4, StringSplitOptions.TrimEntries);
-            if (fields.Length != 4 ||
-                !double.TryParse(fields[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var utilization) ||
-                !long.TryParse(fields[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var usedMiB) ||
-                !long.TryParse(fields[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var totalMiB)) return null;
-            return new GpuResourceMetrics(Math.Clamp(utilization, 0, 100), usedMiB * 1024L * 1024L, totalMiB * 1024L * 1024L, fields[3]);
+            var output = await outputTask;
+            return process.ExitCode == 0 ? output : null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {

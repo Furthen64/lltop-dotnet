@@ -106,6 +106,25 @@ public sealed class ResourceStripTests
         Assert.Equal("Test GPU", snapshot.GpuName);
     }
 
+    [Fact]
+    public void XpuSmiParserReadsIntelXeDeviceMemoryWithoutGpuUtilization()
+    {
+        const string output = """
+            Device Name: Intel(R) Graphics [0xe223]
+            GPU Utilization (%)          N/A
+            GPU Memory Used (MiB)        Tile 0: avg: 29629, min: 29629, max: 29629
+            GPU Memory Util (%)          Tile 0: avg: 91, min: 91, max: 91
+            """;
+
+        var metrics = LinuxSystemResourceProvider.ParseXpuSmiMetrics(output);
+
+        Assert.NotNull(metrics);
+        Assert.Null(metrics.Value.UsagePercent);
+        Assert.Equal(29629L * 1024 * 1024, metrics.Value.VramUsedBytes);
+        Assert.Equal(32559L * 1024 * 1024, metrics.Value.VramTotalBytes);
+        Assert.Equal("Intel(R) Graphics [0xe223]", metrics.Value.Name);
+    }
+
     private static SystemResourceSnapshot SampleSnapshot() => new()
     {
         VramUsedBytes = 22 * GiB,
