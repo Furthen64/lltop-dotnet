@@ -81,7 +81,7 @@ void ApplyLayout()
     help.Y = Pos.Bottom(statusFrame);
     resourceStrip.Y = Pos.Bottom(help);
 }
-win.ViewportChanged += (_, _) => ApplyLayout();
+win.ViewportChanged += (_, _) => { ApplyLayout(); RefreshProfileItems(runningProfile); };
 ApplyLayout();
 
 void RefreshProfileItems(string? selectName = null)
@@ -93,6 +93,7 @@ void RefreshProfileItems(string? selectName = null)
         var summary = SummaryFor(p.Name);
         var marker = p.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase)
             ? runner.State == RunnerState.Running ? "▶" : "◐"
+            : !File.Exists(AppConfig.Expand(p.Model)) ? "✗"
             : summary?.LastExitCode is not null and not 0 ? "!" : "○";
         var size = CompactModelSize(p.Model);
         var width = Math.Max(12, profileFrame.Viewport.Width > 0 ? profileFrame.Viewport.Width - 3 : 32);
@@ -167,7 +168,7 @@ void UpdateStatus(string message = "")
         : plan.RemovedArguments.Count > 0 ? $"Warning   Unsupported options removed: {string.Join(", ", plan.RemovedArguments.Select(x => x.OptionName).Distinct(StringComparer.Ordinal))}"
         : !string.IsNullOrWhiteSpace(message) ? $"Info      {message}"
         : runner.IsActive ? $"Metrics   prompt {serverStats.PromptTokensPerSecond:F1}  ·  gen {serverStats.EvalTokensPerSecond:F1} tok/s  ·  tokens {serverStats.GeneratedTokens}  ·  offload {serverStats.OffloadedLayers}/{serverStats.TotalLayers}"
-        : "Ready     Enter start  ·  e edit  ·  v preview command";
+        : "";
     lines.Add(notice);
     status.Text = string.Join('\n', lines);
 }
@@ -201,8 +202,7 @@ string FormatProfileOverview(Profile? profile)
         ? $"Enabled\nProjector     {Path.GetFileName(profile.Mmproj)}"
         : "Disabled";
     return $"Ready to launch\n\n" +
-           $"Enter  Start server     e  Edit profile     v  Preview command\n\n" +
-           $"Model\n" +
+            $"Model\n" +
            $"File          {name}\n" +
            $"Size          {(size.Length == 0 ? "unavailable" : size)}\n" +
            $"Architecture  {architecture}\n" +
@@ -253,6 +253,12 @@ async Task Launch(bool restart = false)
 {
     var profile = SelectedProfile();
     if (profile is null) { UpdateStatus("Create a profile first (n)."); return; }
+    if (!File.Exists(AppConfig.Expand(profile.Model)))
+    {
+        if (MessageBox.Query(app, "Model not found", $"Model file not found:\n{AppConfig.Expand(profile.Model)}\n\nDelete this profile?", "Cancel", "Delete") == 1)
+            DeleteSelected();
+        return;
+    }
     try
     {
         if (runner.IsActive)
@@ -362,6 +368,7 @@ runner.StateChanged += _ => app.Invoke(() => { RefreshProfileItems(runningProfil
 runner.Exited += exit => app.Invoke(() =>
 {
     var name = runningProfile; runningProfile = "";
+    logLines.Clear();
     try { SaveActiveRun(exit); }
     catch (Exception ex) { UpdateStatus($"Could not save run history: {ex.Message}"); }
     RefreshProfileItems(name); RefreshLogs();
@@ -426,7 +433,6 @@ app.Keyboard.KeyDown += (_, key) =>
     else if (text.Equals("q", StringComparison.OrdinalIgnoreCase) || key.KeyCode == KeyCode.Esc) { _ = Quit(); key.Handled = true; }
 };
 
-RefreshProfileItems();
 RefreshLogs();
 var startupMessage = removedLegacyStarter ? "Removed the obsolete empty starter profile." : cfg.LoadMessage;
 UpdateStatus(load.Errors.Count == 0 ? startupMessage : $"Skipped invalid profiles: {string.Join(" | ", load.Errors)}");
@@ -474,6 +480,7 @@ _ = Task.Run(async () =>
         }
     }
 });
+_ = Task.Run(async () => { await Task.Delay(50); app.Invoke(() => RefreshProfileItems(runningProfile)); });
 app.Run(win);
 monitorCancellation.Cancel();
 runner.Dispose();
@@ -500,7 +507,7 @@ static bool EditProfile(IApplication app, Profile profile, string title)
     Field("Context", profile.Ctx.ToString(), 16); Field("GPU layers", profile.Ngl.ToString(), 16, 49);
     Field("Parallel", profile.Parallel.ToString(), 19); Field("Threads (0 = auto)", profile.Threads.ToString(), 19, 49);
     Field("Flash attention (auto/on/off)", profile.FlashAttn, 22); Field("Alias", profile.Alias, 22, 49);
-    Field("Cache K", profile.CacheK, 25); Field("Cache V", profile.CacheV, 25, 49);
+    Field("Cache K (q4_0/q8_0/f16/blank)", profile.CacheK, 25); Field("Cache V (q4_0/q8_0/f16/blank)", profile.CacheV, 25, 49);
     Field("Temperature", profile.Temp.ToString(CultureInfo.InvariantCulture), 28); Field("Top P", profile.TopP.ToString(CultureInfo.InvariantCulture), 28, 49);
     Field("Top K", profile.TopK.ToString(), 31); Field("Min P", profile.MinP.ToString(CultureInfo.InvariantCulture), 31, 49);
     Field("Repeat penalty", profile.RepeatPenalty.ToString(CultureInfo.InvariantCulture), 34); Field("Repeat last N", profile.RepeatLastN.ToString(), 34, 49);
@@ -543,7 +550,7 @@ static bool EditProfile(IApplication app, Profile profile, string title)
             profile.Ctx = ParseInt(T("Context"), "Context"); profile.Ngl = ParseInt(T("GPU layers"), "GPU layers");
             profile.Parallel = ParseInt(T("Parallel"), "Parallel"); profile.Threads = ParseInt(T("Threads (0 = auto)"), "Threads");
             profile.FlashAttn = T("Flash attention (auto/on/off)").Trim().ToLowerInvariant(); profile.Alias = T("Alias").Trim();
-            profile.CacheK = T("Cache K").Trim(); profile.CacheV = T("Cache V").Trim();
+            profile.CacheK = T("Cache K (q4_0/q8_0/f16/blank)").Trim(); profile.CacheV = T("Cache V (q4_0/q8_0/f16/blank)").Trim();
             profile.Temp = ParseDouble(T("Temperature"), "Temperature"); profile.TopP = ParseDouble(T("Top P"), "Top P");
             profile.TopK = ParseInt(T("Top K"), "Top K"); profile.MinP = ParseDouble(T("Min P"), "Min P");
             profile.RepeatPenalty = ParseDouble(T("Repeat penalty"), "Repeat penalty"); profile.RepeatLastN = ParseInt(T("Repeat last N"), "Repeat last N");

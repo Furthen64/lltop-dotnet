@@ -29,7 +29,16 @@ static class FirstRunProfiles
                     var extension = Path.GetExtension(path);
                     if (extension.Equals(".gguf", StringComparison.OrdinalIgnoreCase) ||
                         extension.Equals(".bin", StringComparison.OrdinalIgnoreCase))
-                        models.Add(Path.GetFullPath(path));
+                    {
+                        try
+                        {
+                            var meta = GgufMetadataReader.Read(path);
+                            var arch = meta.String("general.architecture");
+                            if (!string.IsNullOrEmpty(arch) && !IsNonChatArchitecture(arch))
+                                models.Add(Path.GetFullPath(path));
+                        }
+                        catch { /* skip files we can't read */ }
+                    }
                 }
 
                 if (fileDepth >= maxDepth) return;
@@ -229,5 +238,12 @@ static class FirstRunProfiles
         if (!capabilities.SupportsOption("--flash-attn")) profile.FlashAttn = "";
         if (!capabilities.SupportsOption("--cache-type-k")) profile.CacheK = "";
         if (!capabilities.SupportsOption("--cache-type-v")) profile.CacheV = "";
+    }
+
+    static bool IsNonChatArchitecture(string arch)
+    {
+        var a = arch.ToLowerInvariant();
+        return a == "bert" || a == "nomic-bert" || a == "jina" || a == "e5-mistral" ||
+               a == "colbert-architectures" || a == "jina-colbert-v2";
     }
 }
