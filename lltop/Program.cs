@@ -94,10 +94,12 @@ void RefreshProfileItems(string? selectName = null)
         var marker = p.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase)
             ? runner.State == RunnerState.Running ? "▶" : "◐"
             : !File.Exists(AppConfig.Expand(p.Model)) ? "✗"
-            : summary?.LastExitCode is not null and not 0 ? "!" : "○";
+            : summary?.LastExitCode is not null and not 0 ? "💥" : "○";
         var size = CompactModelSize(p.Model);
         var width = Math.Max(12, profileFrame.Viewport.Width > 0 ? profileFrame.Viewport.Width - 3 : 32);
-        profileItems.Add(UiText.ProfileRow(marker, p.Vision, p.Name, size, width));
+        var modelBadge = p.Model.Contains("diffusion", StringComparison.OrdinalIgnoreCase) ? "🌀" : "🧠";
+        var deviceBadge = p.Ngl == 0 ? "🖥️" : "⚡";
+        profileItems.Add(UiText.ProfileRow(marker, p.Vision, p.Name, size, width, $"{modelBadge} {deviceBadge}"));
     }
     profileList.SetSource(profileItems);
     if (profiles.Count == 0) { selected = 0; profileList.SelectedItem = 0; }

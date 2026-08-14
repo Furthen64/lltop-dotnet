@@ -22,4 +22,12 @@ public sealed class UiTextTests
         Assert.Equal("18m ago", UiText.RelativeTime(now.AddMinutes(-18), now));
         Assert.Equal("3h ago", UiText.RelativeTime(now.AddHours(-3), now));
     }
+
+    [Fact]
+    public void ProfileRow_AlignsSystemEmojiBadgesByTerminalWidth()
+    {
+        var row = UiText.ProfileRow("💥", false, "diffusiongemma", "15.7G", 32, "🌀 🖥️");
+
+        Assert.Equal("💥 🌀 🖥️ diffusiongemma" + "    15.7G", row);
+    }
 }
