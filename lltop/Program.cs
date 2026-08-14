@@ -224,7 +224,7 @@ void SaveActiveRun(ServerExit exit)
         stats = serverStats;
     }
     if (runner.StartedAt is not { } started) return;
-    RunHistory.Save(cfg.RunsDir, RunRecord.Create(profile, runner.Command, started, DateTimeOffset.Now, exit.ExitCode, exit.Requested ? "stopped" : "exit", stats));
+    RunHistory.Save(cfg.RunsDir, RunRecord.Create(profile, runner.Command, started, DateTimeOffset.Now, exit.ExitCode, exit.Requested ? "stopped" : "exit", stats, runner.LogPath));
     historySummaries.Remove(profile.Name);
 }
 
@@ -272,7 +272,13 @@ async Task Launch(bool restart = false)
         if (!restart && cfg.ConfirmRecentFailure)
         {
             var recent = RunHistory.FindRecentFailure(cfg.RunsDir, profile, cfg.RecentFailureWindowSeconds, cfg.StartupFailureSeconds);
-            if (recent is not null && MessageBox.Query(app, "Recent startup failure", $"This configuration failed recently (exit {recent.ExitCode}, {recent.DurationSeconds:F1}s).\n\nRun it again?", "Cancel", "Run again") != 1) return;
+            while (recent is not null)
+            {
+                var answer = MessageBox.Query(app, "Recent startup failure", $"This configuration failed recently (exit {recent.ExitCode}, {recent.DurationSeconds:F1}s).\n\nAnalyze it before trying again?", "Cancel", "Analyze", "Run again");
+                if (answer == 0) return;
+                if (answer == 2) break;
+                ShowStartupFailureAnalysis(app, cfg, profile, recent);
+            }
         }
         var capability = CapabilitiesFor(profile);
         var plan = LaunchPlanFor(profile, capability);
@@ -632,6 +638,19 @@ static void ShowHistory(IApplication app, AppConfig cfg, Profile profile)
     };
     close.Accepting += (_, _) => app.RequestStop();
     window.Add(runs, detail, annotate, close); Refresh(); app.Run(window);
+}
+
+static void ShowStartupFailureAnalysis(IApplication app, AppConfig cfg, Profile profile, RunRecord run)
+{
+    var window = new Window { Title = " Startup failure analysis ", Width = Dim.Percent(90), Height = Dim.Percent(85) };
+#pragma warning disable CS0618
+    var report = new TextView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(3), ReadOnly = true, WordWrap = true, Text = StartupFailureAnalysis.Create(profile, run, cfg.LogsDir) };
+#pragma warning restore CS0618
+    var close = new Button { X = 1, Y = Pos.Bottom(report), Text = "Back", IsDefault = true };
+    close.Accepting += (_, _) => app.RequestStop();
+    window.KeyDown += (_, key) => { if (key.KeyCode == KeyCode.Esc) { app.RequestStop(); key.Handled = true; } };
+    window.Add(report, close);
+    app.Run(window);
 }
 
 static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
