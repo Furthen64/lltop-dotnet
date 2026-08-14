@@ -194,7 +194,7 @@ sealed class ServerCapabilityCache
 static class ServerCapabilityParser
 {
     static readonly Regex OptionRegex = new(@"(?<!\S)(--[A-Za-z0-9][A-Za-z0-9-]*|-[A-Za-z0-9][A-Za-z0-9-]*)(?:[=,\s]|$)", RegexOptions.Compiled);
-    static readonly Regex BuildRegex = new(@"\b(?:version|build)\s+(\d+)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    static readonly Regex BuildRegex = new(@"\b(?:version|build)\s*[:=]?\s+(\d+)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     static readonly Regex CommitRegex = new(@"\b([0-9a-f]{7,12})\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     static readonly Regex ComputeRegex = new(@"compute capability(?:\s*[:=]|\s+)(\d+\.\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 

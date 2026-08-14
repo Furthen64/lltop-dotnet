@@ -87,6 +87,14 @@ public sealed class ServerCapabilityCompatibilityTests : IDisposable
     }
 
     [Fact]
+    public void ParsesBuildNumberWhenVersionUsesColon()
+    {
+        var capability = Capability("llama.cpp server version: 8123 (deadbeef12)", ModernHelp);
+        Assert.Equal(8123, capability.BuildNumber);
+        Assert.Equal("8123 (deadbeef12)", capability.BuildSummary);
+    }
+
+    [Fact]
     public void UnsupportedFlagWithSeparateValue_RemovesOptionAndValue()
     {
         var profile = BaseProfile();

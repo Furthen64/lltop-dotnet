@@ -16,6 +16,8 @@ internal static class LltopTheme
     internal static readonly Color Highlight = new(95, 175, 255);
     internal static readonly Color SelectedText = new(255, 255, 175);
     internal static readonly Color SelectedBackground = new(95, 95, 255);
+    internal static readonly Color AnalysisBackground = new(20, 31, 55);
+    internal static readonly Color AnalysisText = new(225, 235, 255);
 
     internal static void Apply(
         IEnumerable<FrameView> frames,
@@ -43,6 +45,14 @@ internal static class LltopTheme
         logView.PanelAttribute = normal;
         Override(status, _ => normal);
     }
+
+#pragma warning disable CS0618 // Terminal.Gui 2.4 ships TextView as its built-in read-only text control.
+    internal static void ApplyAnalysis(TextView report)
+    {
+        var analysis = new TuiAttribute(AnalysisText, AnalysisBackground);
+        Override(report, _ => analysis);
+    }
+#pragma warning restore CS0618
 
     private static void Override(View view, Func<VisualRole, TuiAttribute> attributeForRole)
     {

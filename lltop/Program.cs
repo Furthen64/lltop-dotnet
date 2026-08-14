@@ -146,7 +146,8 @@ void UpdateStatus(string message = "")
     var summary = SummaryFor(p.Name);
     var backend = string.IsNullOrWhiteSpace(capability.Backend) ? "unknown" : capability.Backend;
     var device = gpu.IsExplicit ? gpu.Summary : "Automatic";
-    var server = $"{backend} backend  ·  llama.cpp {capability.BuildSummary}";
+    var runtimeName = Path.GetFileName(capability.BinaryPath);
+    var server = $"{runtimeName}  ·  {backend} backend  ·  llama.cpp {capability.BuildSummary}";
     if (!string.IsNullOrWhiteSpace(capability.GpuName)) server += $"  ·  {capability.GpuName}";
     var vision = p.Vision ? $"On  ·  {Path.GetFileName(p.Mmproj)}" : "Off";
     var lastRun = summary?.LastRunAt is { } last
@@ -201,6 +202,12 @@ string FormatProfileOverview(Profile? profile)
     var vision = profile.Vision
         ? $"Enabled\nProjector     {Path.GetFileName(profile.Mmproj)}"
         : "Disabled";
+    var capability = CapabilitiesFor(profile);
+    var runtimePath = string.IsNullOrWhiteSpace(capability.BinaryPath)
+        ? (string.IsNullOrWhiteSpace(profile.LlamaServer) ? cfg.LlamaServer : profile.LlamaServer)
+        : capability.BinaryPath;
+    var runtime = Path.GetFileName(runtimePath);
+    var backend = string.IsNullOrWhiteSpace(capability.Backend) ? "unknown" : capability.Backend;
     return $"Ready to launch\n\n" +
             $"Model\n" +
            $"File          {name}\n" +
@@ -209,6 +216,11 @@ string FormatProfileOverview(Profile? profile)
            (metadataName.Length == 0 ? "" : $"Identity      {metadataName}\n") +
            $"Context       {profile.Ctx:N0}\n" +
            $"GPU layers    {profile.Ngl}\n\n" +
+           $"Runtime\n" +
+           $"File          {runtime}\n" +
+           $"Version       llama.cpp {capability.BuildSummary}\n" +
+           $"Backend       {backend}\n" +
+           $"Path          {runtimePath}\n\n" +
            $"Vision        {vision}";
 }
 
@@ -646,6 +658,7 @@ static void ShowStartupFailureAnalysis(IApplication app, AppConfig cfg, Profile 
 #pragma warning disable CS0618
     var report = new TextView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(3), ReadOnly = true, WordWrap = true, Text = StartupFailureAnalysis.Create(profile, run, cfg.LogsDir) };
 #pragma warning restore CS0618
+    LltopTheme.ApplyAnalysis(report);
     var close = new Button { X = 1, Y = Pos.Bottom(report), Text = "Back", IsDefault = true };
     close.Accepting += (_, _) => app.RequestStop();
     window.KeyDown += (_, key) => { if (key.KeyCode == KeyCode.Esc) { app.RequestStop(); key.Handled = true; } };
