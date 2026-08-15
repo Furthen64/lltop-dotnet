@@ -23,11 +23,4 @@ public sealed class UiTextTests
         Assert.Equal("3h ago", UiText.RelativeTime(now.AddHours(-3), now));
     }
 
-    [Fact]
-    public void ProfileRow_AlignsSystemEmojiBadgesByTerminalWidth()
-    {
-        var row = UiText.ProfileRow("💥", false, "diffusiongemma", "15.7G", 32, "🌀 🖥️");
-
-        Assert.Equal("💥 🌀 🖥️ diffusiongemma" + "    15.7G", row);
-    }
 }

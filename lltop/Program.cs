@@ -47,7 +47,7 @@ var statusFrame = new FrameView { Title = " Selected profile / server ", X = 0, 
 var status = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(), Text = "Loading…" };
 statusFrame.Add(status);
 var help = new Label { X = 1, Y = Pos.Bottom(statusFrame), Width = Dim.Fill(2), Height = 3,
-    Text = "[Enter] Start   [e] Edit   [v] Preview   [n] New   [F5] Find models\n[↑/↓] Select   [s] Stop   [N] History   [h/?] All keys   [q] Quit" };
+    Text = "[Enter] Start   [e] Edit   [p] Preview   [n] New   [Ctrl+R/F5] Find models\n[↑/↓] Select   [s] Stop   [H] History   [h/?] All keys   [q] Quit" };
 var resourceStrip = new ResourceStripView { X = 1, Y = Pos.Bottom(help), Width = Dim.Fill(2) };
 win.Add(banner, profileFrame, logFrame, statusFrame, help, resourceStrip);
 LltopTheme.Apply([profileFrame, logFrame, statusFrame], banner, profileList, logView, status, help);
@@ -63,8 +63,8 @@ void ApplyLayout()
     var helpHeight = expandedHelp ? 6 : 2;
     help.Height = helpHeight;
     help.Text = expandedHelp
-        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [v] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [F5] Find models\nLOG & RUNS  [l] Auto-scroll   [PgUp/PgDn] Scroll   [Home/End] Jump   [N] History\nSTATUS      [▶] Running   [◐] Starting/stopping   [!] Last run failed   [V] Vision\nHELP        [h/?] Show fewer keys"
-        : "[Enter] Start   [e] Edit   [v] Preview   [n] New   [F5] Find models\n[↑/↓] Select   [s] Stop   [N] History   [h/?] All keys   [q] Quit";
+        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+R/F5] Find models\nLOG & RUNS  [l] Auto-scroll   [PgUp/PgDn] Scroll   [Home/End] Jump   [H] History\nSTATUS      [▶] Running   [◐] Starting/stopping   [!] Last run failed   [V] Vision\nHELP        [h/?] Show fewer keys"
+        : "[Enter] Start   [e] Edit   [p] Preview   [n] New   [Ctrl+R/F5] Find models\n[↑/↓] Select   [s] Stop   [H] History   [h/?] All keys   [q] Quit";
     var reserved = 10 + helpHeight + 1;
     if (win.Viewport.Width is > 0 and < 84)
     {
@@ -94,12 +94,11 @@ void RefreshProfileItems(string? selectName = null)
         var marker = p.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase)
             ? runner.State == RunnerState.Running ? "▶" : "◐"
             : !File.Exists(AppConfig.Expand(p.Model)) ? "✗"
-            : summary?.LastExitCode is not null and not 0 ? "💥" : "○";
+            : summary?.LastExitCode is not null and not 0 ? "!"
+            : summary?.RunCount == 0 ? "✦" : "○";
         var size = CompactModelSize(p.Model);
         var width = Math.Max(12, profileFrame.Viewport.Width > 0 ? profileFrame.Viewport.Width - 3 : 32);
-        var modelBadge = p.Model.Contains("diffusion", StringComparison.OrdinalIgnoreCase) ? "🌀" : "🧠";
-        var deviceBadge = p.Ngl == 0 ? "🖥️" : "⚡";
-        profileItems.Add(UiText.ProfileRow(marker, p.Vision, p.Name, size, width, $"{modelBadge} {deviceBadge}"));
+        profileItems.Add(UiText.ProfileRow(marker, p.Vision, p.Name, size, width));
     }
     profileList.SetSource(profileItems);
     if (profiles.Count == 0) { selected = 0; profileList.SelectedItem = 0; }
@@ -258,7 +257,20 @@ void RefreshModels()
     try
     {
         var result = FirstRunProfiles.ScanAndGenerate(cfg, capabilityCache.Get(cfg.LlamaServer));
-        ReloadProfiles(message: $"Refresh complete: found {result.ModelsFound} models, created {result.ProfilesCreated} profiles.");
+        if (result.ModelsFound == 0)
+        {
+            ReloadProfiles(message: $"No compatible models found in {cfg.ModelsDir}.");
+            MessageBox.Query(app, "Model discovery", $"No compatible GGUF or BIN models were found in:\n{cfg.ModelsDir}\n\nlltop scans up to {FirstRunProfiles.ModelSearchDepth} folders deep and skips unreadable files, mmproj files, and paths matched by .llmignore.", "OK");
+            return;
+        }
+        var message = result.ProfilesCreated == 0
+            ? $"Found {result.ModelsFound} models; all already have profiles."
+            : $"Refresh complete: found {result.ModelsFound} models, created {result.ProfilesCreated} profiles.";
+        ReloadProfiles(message: message);
+        var detail = result.ProfilesCreated == 0
+            ? $"Found {result.ModelsFound} compatible model{(result.ModelsFound == 1 ? "" : "s")} in:\n{cfg.ModelsDir}\n\nAll of them already have profiles, so nothing was created."
+            : $"Found {result.ModelsFound} compatible model{(result.ModelsFound == 1 ? "" : "s")} in:\n{cfg.ModelsDir}\n\nCreated {result.ProfilesCreated} new profile{(result.ProfilesCreated == 1 ? "" : "s")}.";
+        MessageBox.Query(app, "Model discovery", detail, "OK");
     }
     catch (Exception ex) { UpdateStatus($"Refresh failed: {ex.Message}"); }
 }
@@ -282,6 +294,21 @@ async Task Launch(bool restart = false)
             UpdateStatus("Stopping the current server for restart…");
             await runner.StopAsync();
             if (runner.LastExit is { } stopped) SaveActiveRun(stopped);
+        }
+        if (!restart && !RunHistory.HasRunForScenario(cfg.RunsDir, profile))
+        {
+            var firstLaunch = ShowFirstLaunchAdvisor(app, cfg, profile, CapabilitiesFor(profile), capabilityCache.Get(cfg.LlamaServer));
+            if (firstLaunch == FirstLaunchAction.Cancel) return;
+            if (firstLaunch == FirstLaunchAction.Edit)
+            {
+                EditSelected();
+                return;
+            }
+            if (firstLaunch == FirstLaunchAction.Preview)
+            {
+                UpdateStatus(FormatPlanSummary(LaunchPlanFor(profile, CapabilitiesFor(profile))));
+                return;
+            }
         }
         if (!restart && cfg.ConfirmRecentFailure)
         {
@@ -418,12 +445,13 @@ app.Keyboard.KeyDown += (_, key) =>
     else if (key.KeyCode == KeyCode.Enter) { _ = Launch(); key.Handled = true; }
     else if (text == "s") { _ = Stop(false); key.Handled = true; }
     else if (text == "K") { _ = Stop(true); key.Handled = true; }
+    else if (key.KeyCode == (KeyCode.R | KeyCode.CtrlMask)) { RefreshModels(); key.Handled = true; }
     else if (text.Equals("r", StringComparison.OrdinalIgnoreCase)) { _ = Launch(true); key.Handled = true; }
     else if (text == "n") { NewProfile(); key.Handled = true; }
     else if (text.Equals("e", StringComparison.OrdinalIgnoreCase)) { EditSelected(); key.Handled = true; }
     else if (text.Equals("d", StringComparison.OrdinalIgnoreCase)) { DuplicateSelected(); key.Handled = true; }
     else if (text.Equals("x", StringComparison.OrdinalIgnoreCase)) { DeleteSelected(); key.Handled = true; }
-    else if (text.Equals("v", StringComparison.OrdinalIgnoreCase))
+    else if (text.Equals("p", StringComparison.OrdinalIgnoreCase))
     {
         var p = SelectedProfile();
         UpdateStatus(p is null ? "No profile selected." : FormatPlanSummary(LaunchPlanFor(p, CapabilitiesFor(p))));
@@ -442,13 +470,13 @@ app.Keyboard.KeyDown += (_, key) =>
         if (logAutoScroll) logView.MoveEnd(); else logView.ScrollTo(new System.Drawing.Point(0, logScrollRow));
         UpdateStatus($"Log auto-scroll = {logAutoScroll}."); key.Handled = true;
     }
-    else if (text == "N")
+    else if (text == "H")
     {
         var p = SelectedProfile();
         if (p is null) UpdateStatus("No profile selected."); else ShowHistory(app, cfg, p);
         profileList.SetFocus(); UpdateStatus(); key.Handled = true;
     }
-    else if (text is "h" or "H" or "?") { expandedHelp = !expandedHelp; ApplyLayout(); key.Handled = true; }
+    else if (text is "h" or "?") { expandedHelp = !expandedHelp; ApplyLayout(); key.Handled = true; }
     else if (key.KeyCode == KeyCode.F5) { RefreshModels(); key.Handled = true; }
     else if (text.Equals("q", StringComparison.OrdinalIgnoreCase) || key.KeyCode == KeyCode.Esc) { _ = Quit(); key.Handled = true; }
 };
@@ -668,6 +696,52 @@ static void ShowStartupFailureAnalysis(IApplication app, AppConfig cfg, Profile 
     app.Run(window);
 }
 
+static FirstLaunchAction ShowFirstLaunchAdvisor(IApplication app, AppConfig cfg, Profile profile, ServerCapabilityRecord capability, ServerCapabilityRecord suggestedCapability)
+{
+    var architecture = "unknown";
+    try { architecture = GgufMetadataReader.Read(profile.Model).String("general.architecture") ?? architecture; }
+    catch { }
+    var isDiffusion = architecture.Contains("diffusion", StringComparison.OrdinalIgnoreCase) || profile.Model.Contains("diffusion", StringComparison.OrdinalIgnoreCase);
+    var selectedRuntimePath = string.IsNullOrWhiteSpace(capability.BinaryPath) ? profile.LlamaServer : capability.BinaryPath;
+    var suggestedRuntimePath = string.IsNullOrWhiteSpace(suggestedCapability.BinaryPath) ? cfg.LlamaServer : suggestedCapability.BinaryPath;
+    var suggestedRuntime = Path.GetFileName(suggestedRuntimePath);
+    var suggestedBackend = string.IsNullOrWhiteSpace(suggestedCapability.Backend) ? "unknown" : suggestedCapability.Backend;
+    var usesSuggestedRuntime = string.Equals(Path.GetFullPath(selectedRuntimePath), Path.GetFullPath(suggestedRuntimePath), StringComparison.OrdinalIgnoreCase);
+    var advice = isDiffusion
+        ? "⚠ This is an experimental diffusion-style GGUF. Select a diffusion-enabled llama-server runtime before launching, unless you intend to test this runtime."
+        : "No known compatibility issue was detected. This configuration has not been run yet.";
+    var report = $"New configuration — no previous run.\n\n" +
+                 $"Model        {Path.GetFileName(profile.Model)}\n" +
+                 $"Architecture {architecture}\n\n" +
+                 $"Suggested backend\n" +
+                 $"Runtime      {suggestedRuntime}\n" +
+                 $"Version      llama.cpp {suggestedCapability.BuildSummary}\n" +
+                 $"Backend      {suggestedBackend}\n" +
+                 $"Path         {suggestedRuntimePath}\n" +
+                 $"GPU layers   {profile.Ngl}\n\n" +
+                 $"{(capability.BinaryExists ? "✅" : "❌")} Runtime file {(capability.BinaryExists ? "found" : "missing")}\n" +
+                 $"{(capability.VersionProbeSucceeded ? "✅" : "⚠")} --version {(capability.VersionProbeSucceeded ? "succeeds" : "did not succeed")}\n" +
+                 $"{(capability.HelpProbeSucceeded ? "✅" : "⚠")} --help {(capability.HelpProbeSucceeded ? "succeeds" : "did not succeed")}" +
+                 (usesSuggestedRuntime ? "" : $"\n⚠ Profile uses {Path.GetFileName(selectedRuntimePath)} instead of the suggested runtime.") +
+                 "\n\n" +
+                 advice;
+    var window = new Window { Title = " First launch advisor ", Width = Dim.Percent(80), Height = 26 };
+    window.KeyDown += (_, key) => { if (key.KeyCode == KeyCode.Esc) { app.RequestStop(); key.Handled = true; } };
+    window.Add(new Label { X = 1, Y = 1, Width = Dim.Fill(2), Height = 18, Text = report });
+    var action = FirstLaunchAction.Cancel;
+    var cancel = new Button { X = 1, Y = 21, Text = "Cancel" };
+    var edit = new Button { X = Pos.Right(cancel) + 2, Y = 21, Text = "Edit profile" };
+    var preview = new Button { X = Pos.Right(edit) + 2, Y = 21, Text = "Preview command" };
+    var launch = new Button { X = Pos.Right(preview) + 2, Y = 21, Text = "Launch", IsDefault = true };
+    cancel.Accepting += (_, _) => app.RequestStop();
+    edit.Accepting += (_, _) => { action = FirstLaunchAction.Edit; app.RequestStop(); };
+    preview.Accepting += (_, _) => { action = FirstLaunchAction.Preview; app.RequestStop(); };
+    launch.Accepting += (_, _) => { action = FirstLaunchAction.Launch; app.RequestStop(); };
+    window.Add(cancel, edit, preview, launch);
+    app.Run(window);
+    return action;
+}
+
 static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
 {
     var wizard = new Window { Title = " Welcome to lltop ", Width = 90, Height = 19 };
@@ -725,3 +799,5 @@ static string FormatPlanSummary(LaunchPlan plan)
         ? command
         : $"{command}\nRemoved unsupported options: {string.Join(", ", plan.RemovedArguments.Select(x => x.Display).Distinct(StringComparer.Ordinal))}";
 }
+
+enum FirstLaunchAction { Cancel, Edit, Preview, Launch }

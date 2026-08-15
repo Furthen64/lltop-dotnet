@@ -119,5 +119,8 @@ internal static class RunHistory
         return Load(directory).Select(x => x.Record).Where(x => x.StartedAt >= cutoff && x.ExitCode != 0 && x.DurationSeconds < startupSeconds && SameScenario(x, p)).OrderByDescending(x => x.StartedAt).FirstOrDefault();
     }
 
+    public static bool HasRunForScenario(string directory, Profile p) =>
+        Load(directory).Any(x => SameScenario(x.Record, p));
+
     static bool SameScenario(RunRecord s, Profile p) => s.Model == p.Model && s.Ctx == p.Ctx && s.Ngl == p.Ngl && s.CacheK == p.CacheK && s.CacheV == p.CacheV && s.Batch == p.Batch && s.UBatch == p.UBatch && s.Parallel == p.Parallel && s.Reasoning == p.Reasoning && s.ReasoningBudget == p.ReasoningBudget && s.NoMmap == p.NoMmap && (s.ExtraArgs ?? []).SequenceEqual(p.ExtraArgs);
 }

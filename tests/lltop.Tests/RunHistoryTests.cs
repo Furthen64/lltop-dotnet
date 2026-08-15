@@ -30,5 +30,16 @@ public sealed class RunHistoryTests : IDisposable
         Assert.Null(RunHistory.FindRecentFailure(dir, profile, 120, 20));
     }
 
+    [Fact]
+    public void RecognizesPreviousRunOnlyForTheSameScenario()
+    {
+        var profile = new Profile { Name = "qwen", Model = "/m.gguf" };
+        RunHistory.Save(dir, RunRecord.Create(profile, "server", DateTimeOffset.Now.AddSeconds(-2), DateTimeOffset.Now, 0, "exit", new ServerStats()));
+
+        Assert.True(RunHistory.HasRunForScenario(dir, profile));
+        profile.Ngl++;
+        Assert.False(RunHistory.HasRunForScenario(dir, profile));
+    }
+
     public void Dispose() { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
 }

@@ -29,4 +29,13 @@ public sealed class LogLineStyleTests
     {
         Assert.Equal(LogLineKind.Warning, LogLineStyle.Classify("WARN: CHECK THIS"));
     }
+
+    [Theory]
+    [InlineData("0.00.189.231 W common_fit_params: loading warning", "Warning")]
+    [InlineData("0.00.307.681 E srv load_model: rejected architecture", "Error")]
+    [InlineData("0.00.001.000 I srv listening on port 8080", "Normal")]
+    public void ClassifiesLlamaSeverityPrefix(string line, string expected)
+    {
+        Assert.Equal(expected, LogLineStyle.Classify(line).ToString());
+    }
 }

@@ -1,4 +1,5 @@
 using Terminal.Gui.Drawing;
+using System.Text.RegularExpressions;
 
 internal enum LogLineKind
 {
@@ -13,6 +14,8 @@ internal enum LogLineKind
 
 internal static class LogLineStyle
 {
+    static readonly Regex LlamaSeverity = new(@"(?:^|\s)([IWE])\s+(?=[A-Za-z_])", RegexOptions.Compiled);
+
     internal static LogLineKind Classify(string line)
     {
         var lower = line.ToLowerInvariant();
@@ -21,6 +24,15 @@ internal static class LogLineStyle
         if (lower.Contains("failed to fit params to free device memory") &&
             lower.Contains("n_gpu_layers already set by user"))
             return LogLineKind.Hint;
+
+        var severity = LlamaSeverity.Match(line);
+        if (severity.Success)
+            return severity.Groups[1].Value switch
+            {
+                "E" => LogLineKind.Error,
+                "W" => LogLineKind.Warning,
+                _ => LogLineKind.Normal
+            };
 
         if (lower.Contains("error") || lower.Contains("failed")) return LogLineKind.Error;
         if (lower.Contains("warning") || lower.Contains("warn")) return LogLineKind.Warning;
