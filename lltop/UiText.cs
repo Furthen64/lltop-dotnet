@@ -1,5 +1,8 @@
 static class UiText
 {
+    public static string ProfileGlyph(bool isBroken, bool isRunning) =>
+        isBroken ? "💥" : isRunning ? "●" : "○";
+
     public static string ProfileRow(string marker, bool vision, string name, string size, int width)
     {
         var prefix = marker + (vision ? " [V] " : " ");

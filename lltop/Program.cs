@@ -63,7 +63,7 @@ void ApplyLayout()
     var helpHeight = expandedHelp ? 6 : 2;
     help.Height = helpHeight;
     help.Text = expandedHelp
-        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+R/F5] Find models\nLOG & RUNS  [l] Auto-scroll   [PgUp/PgDn] Scroll   [Home/End] Jump   [H] History\nSTATUS      [▶] Running   [◐] Starting/stopping   [!] Last run failed   [V] Vision\nHELP        [h/?] Show fewer keys"
+        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+R/F5] Find models\nLOG & RUNS  [l] Auto-scroll   [PgUp/PgDn] Scroll   [Home/End] Jump   [H] History\nSTATUS      [●] Running   [○] Stopped   [💥] Broken/last launch failed   [V] Vision\nHELP        [h/?] Show fewer keys"
         : "[Enter] Start   [e] Edit   [p] Preview   [n] New   [Ctrl+R/F5] Find models\n[↑/↓] Select   [s] Stop   [H] History   [h/?] All keys   [q] Quit";
     var reserved = 10 + helpHeight + 1;
     if (win.Viewport.Width is > 0 and < 84)
@@ -91,11 +91,11 @@ void RefreshProfileItems(string? selectName = null)
     else foreach (var p in profiles)
     {
         var summary = SummaryFor(p.Name);
-        var marker = p.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase)
-            ? runner.State == RunnerState.Running ? "▶" : "◐"
-            : !File.Exists(AppConfig.Expand(p.Model)) ? "✗"
-            : summary?.LastExitCode is not null and not 0 ? "!"
-            : summary?.RunCount == 0 ? "✦" : "○";
+        // Error state deliberately wins: a profile with a known launch failure must
+        // remain visible as broken even if it is selected or a new launch is pending.
+        var marker = UiText.ProfileGlyph(
+            isBroken: !File.Exists(AppConfig.Expand(p.Model)) || summary?.LastExitCode is not null and not 0,
+            isRunning: p.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase) && runner.State == RunnerState.Running);
         var size = CompactModelSize(p.Model);
         var width = Math.Max(12, profileFrame.Viewport.Width > 0 ? profileFrame.Viewport.Width - 3 : 32);
         profileItems.Add(UiText.ProfileRow(marker, p.Vision, p.Name, size, width));
@@ -738,6 +738,7 @@ static FirstLaunchAction ShowFirstLaunchAdvisor(IApplication app, AppConfig cfg,
     preview.Accepting += (_, _) => { action = FirstLaunchAction.Preview; app.RequestStop(); };
     launch.Accepting += (_, _) => { action = FirstLaunchAction.Launch; app.RequestStop(); };
     window.Add(cancel, edit, preview, launch);
+    launch.SetFocus();
     app.Run(window);
     return action;
 }

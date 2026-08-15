@@ -52,19 +52,17 @@ public sealed class ResourceStripTests
     }
 
     [Fact]
-    public void NarrowFormattingPreservesEssentialPercentagesAndRunningCount()
+    public void NarrowFormattingPreservesMemoryHeadroomBeforeGpuUtilization()
     {
         var snapshot = SampleSnapshot();
 
         var content = ResourceStripFormatter.Format(snapshot, 40);
 
         Assert.True(content.Text.Length <= 40);
-        Assert.Contains("V 69%", content.Text);
-        Assert.Contains("R 59%", content.Text);
-        Assert.Contains("C 24%", content.Text);
-        Assert.Contains("2 RUN", content.Text);
+        Assert.Contains("V 22.0/32.0G", content.Text);
+        Assert.Contains("10.0G FREE", content.Text);
         Assert.DoesNotContain("RTX", content.Text);
-        Assert.DoesNotContain("/", content.Text);
+        Assert.DoesNotContain("G 68%", content.Text);
     }
 
     [Fact]
@@ -73,13 +71,26 @@ public sealed class ResourceStripTests
         var text = ResourceStripFormatter.Format(SampleSnapshot(), 140).Text;
 
         Assert.Contains("VRAM [", text);
-        Assert.Contains("22.0/32.0G 69%", text);
+        Assert.Contains("22.0/32.0G 69% 10.0G FREE", text);
+        Assert.Contains("GPU 68%", text);
+        Assert.DoesNotContain("RTX", text);
         Assert.Contains("RAM [", text);
         Assert.Contains("8.3/14.0G 59%", text);
         Assert.True(text.IndexOf("VRAM", StringComparison.Ordinal) < text.IndexOf(" | GPU", StringComparison.Ordinal));
         Assert.True(text.IndexOf(" | GPU", StringComparison.Ordinal) < text.IndexOf(" | RAM", StringComparison.Ordinal));
         Assert.True(text.IndexOf(" | RAM", StringComparison.Ordinal) < text.IndexOf(" | CPU", StringComparison.Ordinal));
         Assert.EndsWith("2 RUNNING", text);
+    }
+
+    [Fact]
+    public void UnavailableGpuUtilizationUsesOnlyReliableDeviceIdentity()
+    {
+        var withName = ResourceStripFormatter.Format(SampleSnapshot() with { GpuUsagePercent = null, GpuName = "Intel Arc Pro B70" }, 140).Text;
+        var genericName = ResourceStripFormatter.Format(SampleSnapshot() with { GpuUsagePercent = null, GpuName = "Intel GPU" }, 140).Text;
+
+        Assert.Contains("GPU Intel Arc Pro B70 UTIL N/A", withName);
+        Assert.Contains("GPU N/A", genericName);
+        Assert.DoesNotContain("Intel GPU", genericName);
     }
 
     [Fact]

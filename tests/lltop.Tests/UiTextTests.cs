@@ -2,6 +2,16 @@ using Xunit;
 
 public sealed class UiTextTests
 {
+    [Theory]
+    [InlineData(true, true, "💥")]
+    [InlineData(true, false, "💥")]
+    [InlineData(false, true, "●")]
+    [InlineData(false, false, "○")]
+    public void ProfileGlyph_UsesOperationalStateWithBrokenTakingPriority(bool isBroken, bool isRunning, string expected)
+    {
+        Assert.Equal(expected, UiText.ProfileGlyph(isBroken, isRunning));
+    }
+
     [Fact]
     public void ProfileRow_PreservesMarkerVisionSuffixAndBothEndsOfName()
     {

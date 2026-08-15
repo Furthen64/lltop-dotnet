@@ -47,16 +47,16 @@ internal static class ResourceStripFormatter
             if (candidate.Text.Length <= width) return candidate;
         }
 
-        var withoutGpuName = BuildDetailed(snapshot, 3, includeGpuName: false);
-        if (withoutGpuName.Text.Length <= width) return withoutGpuName;
+        var withoutBars = BuildDetailed(snapshot, 0, includeGpuName: false);
+        if (withoutBars.Text.Length <= width) return withoutBars;
 
-        var compact = BuildCompact(snapshot, includeBars: true);
+        var compact = BuildCompact(snapshot, includeFree: true);
         if (compact.Text.Length <= width) return compact;
 
-        var essential = BuildCompact(snapshot, includeBars: false);
+        var essential = BuildCompact(snapshot, includeFree: false);
         if (essential.Text.Length <= width) return essential;
 
-        return Clip(essential, width);
+        return BuildPriorityCompact(snapshot, width);
     }
 
     private static ResourceStripContent BuildDetailed(SystemResourceSnapshot snapshot, int barWidth, bool includeGpuName)
@@ -66,26 +66,52 @@ internal static class ResourceStripFormatter
         var segments = new List<ResourceStripSegment>();
         Add(segments, FormatMemory("VRAM", snapshot.VramUsedBytes, snapshot.VramTotalBytes, vramPercent, barWidth), ThresholdFor(vramPercent));
 
-        var gpuName = includeGpuName && !string.IsNullOrWhiteSpace(snapshot.GpuName) ? $" {ShortGpuName(snapshot.GpuName)}" : "";
-        Add(segments, $"GPU{gpuName} {Percent(snapshot.GpuUsagePercent)}", ThresholdFor(snapshot.GpuUsagePercent));
+        Add(segments, FormatGpu(snapshot, includeGpuName), ThresholdFor(snapshot.GpuUsagePercent));
         Add(segments, FormatMemory("RAM", snapshot.SystemRamUsedBytes, snapshot.SystemRamTotalBytes, ramPercent, barWidth), ThresholdFor(ramPercent));
         Add(segments, $"CPU {Percent(snapshot.CpuUsagePercent)}", ThresholdFor(snapshot.CpuUsagePercent));
         Add(segments, $"{snapshot.RunningServerCount} RUNNING");
         return new ResourceStripContent(segments);
     }
 
-    private static ResourceStripContent BuildCompact(SystemResourceSnapshot snapshot, bool includeBars)
+    private static ResourceStripContent BuildCompact(SystemResourceSnapshot snapshot, bool includeFree)
     {
         var vramPercent = CalculatePercentage(snapshot.VramUsedBytes, snapshot.VramTotalBytes);
         var ramPercent = CalculatePercentage(snapshot.SystemRamUsedBytes, snapshot.SystemRamTotalBytes);
-        var vramBar = includeBars && vramPercent.HasValue ? $" {ProgressBar(vramPercent, 3)}" : "";
-        var ramBar = includeBars && ramPercent.HasValue ? $" {ProgressBar(ramPercent, 3)}" : "";
         var segments = new List<ResourceStripSegment>();
-        Add(segments, $"V{vramBar} {Percent(vramPercent)}", ThresholdFor(vramPercent));
-        Add(segments, $"G {Percent(snapshot.GpuUsagePercent)}", ThresholdFor(snapshot.GpuUsagePercent));
-        Add(segments, $"R{ramBar} {Percent(ramPercent)}", ThresholdFor(ramPercent));
+        Add(segments, FormatCompactMemory("V", snapshot.VramUsedBytes, snapshot.VramTotalBytes, vramPercent, includeFree), ThresholdFor(vramPercent));
+        Add(segments, FormatCompactMemory("R", snapshot.SystemRamUsedBytes, snapshot.SystemRamTotalBytes, ramPercent, includeFree: false), ThresholdFor(ramPercent));
         Add(segments, $"C {Percent(snapshot.CpuUsagePercent)}", ThresholdFor(snapshot.CpuUsagePercent));
         Add(segments, $"{snapshot.RunningServerCount} RUN");
+        Add(segments, $"G {Percent(snapshot.GpuUsagePercent)}", ThresholdFor(snapshot.GpuUsagePercent));
+        return new ResourceStripContent(segments);
+    }
+
+    // Keep complete, decision-useful values on narrow terminals. GPU utilization
+    // and device identity are deliberately lower priority than memory headroom.
+    private static ResourceStripContent BuildPriorityCompact(SystemResourceSnapshot snapshot, int width)
+    {
+        var vramPercent = CalculatePercentage(snapshot.VramUsedBytes, snapshot.VramTotalBytes);
+        var ramPercent = CalculatePercentage(snapshot.SystemRamUsedBytes, snapshot.SystemRamTotalBytes);
+        var candidates = new (string Text, ResourceThreshold Threshold)[]
+        {
+            (FormatCompactMemory("V", snapshot.VramUsedBytes, snapshot.VramTotalBytes, vramPercent, includeFree: true), ThresholdFor(vramPercent)),
+            (FormatCompactMemory("R", snapshot.SystemRamUsedBytes, snapshot.SystemRamTotalBytes, ramPercent, includeFree: false), ThresholdFor(ramPercent)),
+            ($"C {Percent(snapshot.CpuUsagePercent)}", ThresholdFor(snapshot.CpuUsagePercent)),
+            ($"{snapshot.RunningServerCount} RUN", ResourceThreshold.Normal),
+            ($"G {Percent(snapshot.GpuUsagePercent)}", ThresholdFor(snapshot.GpuUsagePercent))
+        };
+        var segments = new List<ResourceStripSegment>();
+        var length = 0;
+        foreach (var candidate in candidates)
+        {
+            var addedLength = candidate.Text.Length + (segments.Count == 0 ? 0 : Separator.Length);
+            if (segments.Count == 0 && candidate.Text.Length > width)
+                return Clip(new ResourceStripContent([new ResourceStripSegment(candidate.Text, candidate.Threshold)]), width);
+            if (length + addedLength > width) continue;
+            if (segments.Count > 0) segments.Add(new ResourceStripSegment(Separator));
+            segments.Add(new ResourceStripSegment(candidate.Text, candidate.Threshold));
+            length += addedLength;
+        }
         return new ResourceStripContent(segments);
     }
 
@@ -98,7 +124,23 @@ internal static class ResourceStripFormatter
     private static string FormatMemory(string label, long? used, long? total, double? percentage, int barWidth)
     {
         if (!used.HasValue || total is not > 0 || !percentage.HasValue) return $"{label} N/A";
-        return $"{label} {ProgressBar(percentage, barWidth)} {GiB(used.Value)}/{GiB(total.Value)}G {Percent(percentage)}";
+        var bar = barWidth > 0 ? $" {ProgressBar(percentage, barWidth)}" : "";
+        return $"{label}{bar} {GiB(used.Value)}/{GiB(total.Value)}G {Percent(percentage)} {GiB(Math.Max(0, total.Value - used.Value))}G FREE";
+    }
+
+    private static string FormatCompactMemory(string label, long? used, long? total, double? percentage, bool includeFree)
+    {
+        if (!used.HasValue || total is not > 0 || !percentage.HasValue) return $"{label} N/A";
+        var free = includeFree ? $" {GiB(Math.Max(0, total.Value - used.Value))}G FREE" : "";
+        return $"{label} {GiB(used.Value)}/{GiB(total.Value)}G {Percent(percentage)}{free}";
+    }
+
+    private static string FormatGpu(SystemResourceSnapshot snapshot, bool includeGpuName)
+    {
+        if (snapshot.GpuUsagePercent.HasValue) return $"GPU {Percent(snapshot.GpuUsagePercent)}";
+        return includeGpuName && IsReliableGpuName(snapshot.GpuName)
+            ? $"GPU {ShortGpuName(snapshot.GpuName!)} UTIL N/A"
+            : "GPU N/A";
     }
 
     private static string GiB(long bytes) => (bytes / 1024d / 1024d / 1024d).ToString("0.0", CultureInfo.InvariantCulture);
@@ -108,6 +150,15 @@ internal static class ResourceStripFormatter
     {
         var compact = name.Replace("NVIDIA GeForce ", "", StringComparison.OrdinalIgnoreCase).Trim();
         return compact.Length <= 20 ? compact : compact[..19] + "…";
+    }
+
+    private static bool IsReliableGpuName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        var normalized = name.Trim();
+        return !normalized.Equals("GPU", StringComparison.OrdinalIgnoreCase) &&
+               !normalized.Equals("Intel GPU", StringComparison.OrdinalIgnoreCase) &&
+               !normalized.Equals("Unknown GPU", StringComparison.OrdinalIgnoreCase);
     }
 
     private static ResourceStripContent Clip(ResourceStripContent content, int width)
