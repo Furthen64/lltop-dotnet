@@ -75,12 +75,9 @@ sealed class Profile
         {
             if (string.IsNullOrWhiteSpace(Mmproj))
                 throw new InvalidOperationException("Vision requires an mmproj path.");
-            var modelName = Path.GetFileName(Model);
-            var normalizedModelName = modelName.Replace('_', '-');
-            if (!normalizedModelName.Contains("qwen3.6", StringComparison.OrdinalIgnoreCase) ||
-                !normalizedModelName.Contains("35b-a3b", StringComparison.OrdinalIgnoreCase))
+            if (!VisionProjectorResolver.SupportsModel(Model))
                 throw new InvalidOperationException("Vision currently supports only Qwen3.6-35B-A3B model GGUFs.");
-            if (!Path.GetFileName(Mmproj).Equals("mmproj-BF16.gguf", StringComparison.OrdinalIgnoreCase))
+            if (!VisionProjectorResolver.IsExpectedProjector(Mmproj))
                 throw new InvalidOperationException("Qwen3.6 vision requires mmproj-BF16.gguf from the same model family.");
         }
         if (!forLaunch) return;

@@ -295,7 +295,7 @@ async Task Launch(bool restart = false)
             await runner.StopAsync();
             if (runner.LastExit is { } stopped) SaveActiveRun(stopped);
         }
-        if (!restart && !RunHistory.HasRunForScenario(cfg.RunsDir, profile))
+        while (!restart && !RunHistory.HasRunForScenario(cfg.RunsDir, profile))
         {
             var firstLaunch = ShowFirstLaunchAdvisor(app, cfg, profile, CapabilitiesFor(profile), capabilityCache.Get(cfg.LlamaServer));
             if (firstLaunch == FirstLaunchAction.Cancel) return;
@@ -309,6 +309,17 @@ async Task Launch(bool restart = false)
                 UpdateStatus(FormatPlanSummary(LaunchPlanFor(profile, CapabilitiesFor(profile))));
                 return;
             }
+            if (firstLaunch == FirstLaunchAction.SetupVision)
+            {
+                if (ShowVisionSetup(app, profile))
+                {
+                    var status = profile.Vision ? $"Vision enabled with {Path.GetFileName(profile.Mmproj)}." : "Vision disabled; this profile will launch text-only.";
+                    try { store.Save(profile); ReloadProfiles(profile.Name, status); }
+                    catch (Exception ex) { UpdateStatus($"Could not save vision setup: {ex.Message}"); }
+                }
+                continue;
+            }
+            break;
         }
         if (!restart && cfg.ConfirmRecentFailure)
         {
@@ -707,40 +718,118 @@ static FirstLaunchAction ShowFirstLaunchAdvisor(IApplication app, AppConfig cfg,
     var suggestedRuntime = Path.GetFileName(suggestedRuntimePath);
     var suggestedBackend = string.IsNullOrWhiteSpace(suggestedCapability.Backend) ? "unknown" : suggestedCapability.Backend;
     var usesSuggestedRuntime = string.Equals(Path.GetFullPath(selectedRuntimePath), Path.GetFullPath(suggestedRuntimePath), StringComparison.OrdinalIgnoreCase);
+    var supportsVision = VisionProjectorResolver.SupportsModel(profile.Model);
+    var projector = supportsVision ? VisionProjectorResolver.FindBeside(profile.Model) : null;
+    var visionStatus = profile.Vision && File.Exists(profile.Mmproj)
+        ? $"Ready — {Path.GetFileName(profile.Mmproj)}"
+        : supportsVision && projector?.Path is not null
+            ? $"Projector found — {Path.GetFileName(projector.Path)}"
+            : supportsVision ? "No matching projector found (text-only launch is available)" : "Not available for this model";
+    var modelsFound = "unavailable";
+    try { modelsFound = FirstRunProfiles.DiscoverModels(cfg.ModelsDir).Count.ToString(CultureInfo.InvariantCulture); }
+    catch { }
+    var discovery = modelsFound == "unavailable"
+        ? "Discovery    unavailable"
+        : $"Discovery    {modelsFound} runnable model{(modelsFound == "1" ? "" : "s")} found";
+    var assessment = isDiffusion ? "Needs attention" : supportsVision && !profile.Vision ? "Ready for text-only launch" : "Ready to launch";
     var advice = isDiffusion
         ? "⚠ This is an experimental diffusion-style GGUF. Select a diffusion-enabled llama-server runtime before launching, unless you intend to test this runtime."
         : "No known compatibility issue was detected. This configuration has not been run yet.";
     var report = $"New configuration — no previous run.\n\n" +
                  $"Model        {Path.GetFileName(profile.Model)}\n" +
                  $"Architecture {architecture}\n\n" +
-                 $"Suggested backend\n" +
+                 $"{discovery}\n\n" +
+                 $"Vision       {visionStatus}\n\n" +
+                 $"Detected runtime\n" +
                  $"Runtime      {suggestedRuntime}\n" +
-                 $"Version      llama.cpp {suggestedCapability.BuildSummary}\n" +
+                 $"Build        llama.cpp {suggestedCapability.BuildSummary}\n" +
                  $"Backend      {suggestedBackend}\n" +
                  $"Path         {suggestedRuntimePath}\n" +
-                 $"GPU layers   {profile.Ngl}\n\n" +
+                 $"GPU layers   {profile.Ngl} requested\n\n" +
                  $"{(capability.BinaryExists ? "✅" : "❌")} Runtime file {(capability.BinaryExists ? "found" : "missing")}\n" +
-                 $"{(capability.VersionProbeSucceeded ? "✅" : "⚠")} --version {(capability.VersionProbeSucceeded ? "succeeds" : "did not succeed")}\n" +
-                 $"{(capability.HelpProbeSucceeded ? "✅" : "⚠")} --help {(capability.HelpProbeSucceeded ? "succeeds" : "did not succeed")}" +
+                 $"{(capability.VersionProbeSucceeded ? "✅" : "⚠")} Runtime version probe {(capability.VersionProbeSucceeded ? "succeeds" : "did not succeed")}\n" +
+                 $"{(capability.HelpProbeSucceeded ? "✅" : "⚠")} Runtime option probe {(capability.HelpProbeSucceeded ? "succeeds" : "did not succeed")}" +
                  (usesSuggestedRuntime ? "" : $"\n⚠ Profile uses {Path.GetFileName(selectedRuntimePath)} instead of the suggested runtime.") +
-                 "\n\n" +
+                 $"\n\nLaunch assessment: {assessment}\n" +
                  advice;
-    var window = new Window { Title = " First launch advisor ", Width = Dim.Percent(80), Height = 26 };
+    var window = new Window { Title = " First launch advisor ", Width = Dim.Percent(80), Height = 30 };
     window.KeyDown += (_, key) => { if (key.KeyCode == KeyCode.Esc) { app.RequestStop(); key.Handled = true; } };
-    window.Add(new Label { X = 1, Y = 1, Width = Dim.Fill(2), Height = 18, Text = report });
+    window.Add(new Label { X = 1, Y = 1, Width = Dim.Fill(2), Height = 22, Text = report });
     var action = FirstLaunchAction.Cancel;
-    var cancel = new Button { X = 1, Y = 21, Text = "Cancel" };
-    var edit = new Button { X = Pos.Right(cancel) + 2, Y = 21, Text = "Edit profile" };
-    var preview = new Button { X = Pos.Right(edit) + 2, Y = 21, Text = "Preview command" };
-    var launch = new Button { X = Pos.Right(preview) + 2, Y = 21, Text = "Launch", IsDefault = true };
+    var cancel = new Button { X = 1, Y = 25, Text = "Cancel" };
+    var vision = new Button { X = Pos.Right(cancel) + 2, Y = 25, Text = "Set up vision" };
+    var edit = new Button { X = Pos.Right(vision) + 2, Y = 25, Text = "Edit profile" };
+    var preview = new Button { X = Pos.Right(edit) + 2, Y = 25, Text = "Preview command" };
+    var launch = new Button { X = Pos.Right(preview) + 2, Y = 25, Text = "Launch", IsDefault = true };
     cancel.Accepting += (_, _) => app.RequestStop();
+    vision.Accepting += (_, _) => { action = FirstLaunchAction.SetupVision; app.RequestStop(); };
     edit.Accepting += (_, _) => { action = FirstLaunchAction.Edit; app.RequestStop(); };
     preview.Accepting += (_, _) => { action = FirstLaunchAction.Preview; app.RequestStop(); };
     launch.Accepting += (_, _) => { action = FirstLaunchAction.Launch; app.RequestStop(); };
-    window.Add(cancel, edit, preview, launch);
+    window.Add(cancel, vision, edit, preview, launch);
     launch.SetFocus();
     app.Run(window);
     return action;
+}
+
+static bool ShowVisionSetup(IApplication app, Profile profile)
+{
+    var supportsVision = VisionProjectorResolver.SupportsModel(profile.Model);
+    var match = supportsVision ? VisionProjectorResolver.FindBeside(profile.Model) : null;
+    var dialog = new Window { Title = " Vision setup ", Width = 92, Height = 22 };
+    var modelFolder = Path.GetDirectoryName(Path.GetFullPath(profile.Model)) ?? "unknown";
+    var message = new Label { X = 2, Y = 1, Width = Dim.Fill(4), Height = 7 };
+    var projectorPath = new TextField { X = 2, Y = 10, Width = Dim.Fill(4), Text = match?.Path ?? profile.Mmproj };
+    var refresh = new Button { X = 2, Y = 13, Text = "Refresh scan" };
+    var use = new Button { X = Pos.Right(refresh) + 2, Y = 13, Text = "Use projector" };
+    var withoutVision = new Button { X = Pos.Right(use) + 2, Y = 13, Text = "Continue without vision" };
+    var back = new Button { X = Pos.Right(withoutVision) + 2, Y = 13, Text = "Back" };
+    var changed = false;
+
+    void Describe(string? scanMessage = null)
+    {
+        message.Text = supportsVision
+            ? $"This model can accept images with a matching vision projector.\n\nModel: {Path.GetFileName(profile.Model)}\nFolder: {modelFolder}\n\nPut {VisionProjectorResolver.ExpectedProjectorName} from this model family in that folder, then refresh.\n{scanMessage ?? match?.Message ?? "No projector has been selected."}"
+            : $"Vision setup is not available for {Path.GetFileName(profile.Model)}.\n\nlltop currently supports vision only for Qwen3.6-35B-A3B model GGUFs with\n{VisionProjectorResolver.ExpectedProjectorName}. You can still launch this model for text chat.";
+    }
+
+    Describe();
+    dialog.Add(message, new Label { X = 2, Y = 8, Text = "Projector path (paste or edit)" }, projectorPath, refresh, use, withoutVision, back);
+    refresh.Accepting += (_, _) =>
+    {
+        match = supportsVision ? VisionProjectorResolver.FindBeside(profile.Model) : null;
+        if (match?.Path is not null) projectorPath.Text = match.Path;
+        Describe(match?.Message);
+    };
+    use.Accepting += (_, _) =>
+    {
+        try
+        {
+            if (!supportsVision) throw new InvalidOperationException("This model is not supported for vision setup.");
+            var path = AppConfig.Expand(projectorPath.Text.Trim());
+            if (!File.Exists(path)) throw new FileNotFoundException("Projector file was not found.", path);
+            var candidate = profile.Copy(profile.Name);
+            candidate.Vision = true;
+            candidate.Mmproj = path;
+            candidate.Validate();
+            profile.Vision = candidate.Vision;
+            profile.Mmproj = candidate.Mmproj;
+            changed = true;
+            app.RequestStop();
+        }
+        catch (Exception ex) { Describe(ex.Message); }
+    };
+    withoutVision.Accepting += (_, _) =>
+    {
+        changed = profile.Vision || !string.IsNullOrWhiteSpace(profile.Mmproj);
+        profile.Vision = false;
+        profile.Mmproj = "";
+        app.RequestStop();
+    };
+    back.Accepting += (_, _) => app.RequestStop();
+    dialog.KeyDown += (_, key) => { if (key.KeyCode == KeyCode.Esc) { app.RequestStop(); key.Handled = true; } };
+    app.Run(dialog);
+    return changed;
 }
 
 static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
@@ -801,4 +890,4 @@ static string FormatPlanSummary(LaunchPlan plan)
         : $"{command}\nRemoved unsupported options: {string.Join(", ", plan.RemovedArguments.Select(x => x.Display).Distinct(StringComparer.Ordinal))}";
 }
 
-enum FirstLaunchAction { Cancel, Edit, Preview, Launch }
+enum FirstLaunchAction { Cancel, SetupVision, Edit, Preview, Launch }

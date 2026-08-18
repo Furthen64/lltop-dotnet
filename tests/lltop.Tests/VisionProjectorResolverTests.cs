@@ -46,6 +46,15 @@ public sealed class VisionProjectorResolverTests : IDisposable
         Assert.Contains("only readable sibling", result.Message);
     }
 
+    [Theory]
+    [InlineData("Qwen3.6-35B-A3B-Q4.gguf", true)]
+    [InlineData("Qwen3.8-27B-Q6K.gguf", false)]
+    [InlineData("DeepSeek-V3.gguf", false)]
+    public void SupportsModel_RecognizesTheVisionFamily(string modelName, bool expected)
+    {
+        Assert.Equal(expected, VisionProjectorResolver.SupportsModel(modelName));
+    }
+
     string WriteGguf(string name, Dictionary<string, string> metadata)
     {
         var path = Path.Combine(directory, name);

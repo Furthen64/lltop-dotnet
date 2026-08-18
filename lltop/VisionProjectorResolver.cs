@@ -4,11 +4,22 @@ sealed record VisionProjectorMatch(string? Path, string Message, bool MetadataMa
 
 static class VisionProjectorResolver
 {
+    public const string ExpectedProjectorName = "mmproj-BF16.gguf";
     static readonly string[] IdentityKeys = ["general.name", "general.basename", "general.architecture"];
     static readonly HashSet<string> Noise = new(StringComparer.Ordinal)
     {
         "gguf", "mmproj", "model", "instruct", "chat", "bf16", "f16", "fp16", "q4", "q5", "q6", "q8", "ud", "xl"
     };
+
+    public static bool SupportsModel(string modelPath)
+    {
+        var name = Path.GetFileName(modelPath).Replace('_', '-');
+        return name.Contains("qwen3.6", StringComparison.OrdinalIgnoreCase) &&
+               name.Contains("35b-a3b", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsExpectedProjector(string projectorPath) =>
+        Path.GetFileName(projectorPath).Equals(ExpectedProjectorName, StringComparison.OrdinalIgnoreCase);
 
     public static VisionProjectorMatch FindBeside(string modelPath)
     {
