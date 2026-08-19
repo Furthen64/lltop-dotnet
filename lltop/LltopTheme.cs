@@ -25,7 +25,8 @@ internal static class LltopTheme
         ListView profileList,
         LogTextView logView,
         Label status,
-        Label help)
+        Label help,
+        Label logStatus)
     {
         var normal = profileList.GetScheme().Normal;
 
@@ -34,6 +35,7 @@ internal static class LltopTheme
 
         Override(banner, _ => new TuiAttribute(Title, normal.Background, TextStyle.Bold));
         Override(help, _ => new TuiAttribute(Muted, normal.Background, TextStyle.Faint));
+        Override(logStatus, _ => new TuiAttribute(Muted, normal.Background, TextStyle.Faint));
 
         Override(profileList, role => role is VisualRole.Focus or VisualRole.Active
             ? new TuiAttribute(SelectedText, SelectedBackground, TextStyle.Bold)

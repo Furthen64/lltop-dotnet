@@ -33,4 +33,23 @@ public sealed class UiTextTests
         Assert.Equal("3h ago", UiText.RelativeTime(now.AddHours(-3), now));
     }
 
+    [Fact]
+    public void RequestMetrics_LabelsTheLatestRequestThroughputAndOutput()
+    {
+        var stats = new ServerStats();
+        stats.Consume("prompt eval time =     810.49 ms /   114 tokens (    7.11 ms per token,   140.66 tokens per second)");
+        stats.Consume("3.43.918.536 I slot print_timing: id 0 | task 1587 | n_decoded = 399, tg = 19.80 t/s, tg_3s = 19.61 t/s");
+
+        var text = UiText.RequestMetrics(stats);
+
+        Assert.Equal("Latest request  input 140.7 tok/s  ·  output 19.8 tok/s  ·  399 output tokens", text);
+        Assert.DoesNotContain("prompt", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RequestMetrics_ExplainsWhenNoRequestHasProducedMetrics()
+    {
+        Assert.Equal("Request stats  Waiting for the first request…", UiText.RequestMetrics(new ServerStats()));
+    }
+
 }

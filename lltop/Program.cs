@@ -28,6 +28,7 @@ var historySummaries = new Dictionary<string, ProfileRunSummary>(StringComparer.
 var closing = false;
 var logAutoScroll = true;
 var logScrollRow = 0;
+DateTimeOffset? logAutoScrollPausedAt = null;
 var expandedHelp = false;
 var externalMonitor = new ExternalServerMonitor(cfg);
 ExternalServer? externalServer = null;
@@ -41,8 +42,9 @@ var banner = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Text = "LLAMA SERVER
 var profileFrame = new FrameView { Title = " Profiles ", X = 0, Y = 2, Width = Dim.Percent(34), Height = Dim.Fill(13) };
 var logFrame = new FrameView { Title = " Profile overview ", X = Pos.Right(profileFrame), Y = 2, Width = Dim.Fill(), Height = Dim.Fill(13) };
 var profileList = new ListView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-var logView = new LogTextView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), ReadOnly = true, WordWrap = false, Text = "Waiting for a server launch…" };
-profileFrame.Add(profileList); logFrame.Add(logView);
+var logView = new LogTextView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(1), ReadOnly = true, WordWrap = false, Text = "Waiting for a server launch…" };
+var logStatus = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Height = 1 };
+profileFrame.Add(profileList); logFrame.Add(logView, logStatus);
 var statusFrame = new FrameView { Title = " Selected profile / server ", X = 0, Y = Pos.Bottom(profileFrame), Width = Dim.Fill(), Height = 10 };
 var status = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(), Text = "Loading…" };
 statusFrame.Add(status);
@@ -50,7 +52,7 @@ var help = new Label { X = 1, Y = Pos.Bottom(statusFrame), Width = Dim.Fill(2), 
     Text = "[Enter] Start   [e] Edit   [p] Preview   [n] New   [Ctrl+R/F5] Find models\n[↑/↓] Select   [s] Stop   [H] History   [h/?] All keys   [q] Quit" };
 var resourceStrip = new ResourceStripView { X = 1, Y = Pos.Bottom(help), Width = Dim.Fill(2) };
 win.Add(banner, profileFrame, logFrame, statusFrame, help, resourceStrip);
-LltopTheme.Apply([profileFrame, logFrame, statusFrame], banner, profileList, logView, status, help);
+LltopTheme.Apply([profileFrame, logFrame, statusFrame], banner, profileList, logView, status, help, logStatus);
 
 ISystemResourceProvider resourceProvider = OperatingSystem.IsLinux()
     ? new LinuxSystemResourceProvider(
@@ -63,7 +65,7 @@ void ApplyLayout()
     var helpHeight = expandedHelp ? 6 : 2;
     help.Height = helpHeight;
     help.Text = expandedHelp
-        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+R/F5] Find models\nLOG & RUNS  [l] Auto-scroll   [PgUp/PgDn] Scroll   [Home/End] Jump   [H] History\nSTATUS      [●] Running   [○] Stopped   [💥] Broken/last launch failed   [V] Vision\nHELP        [h/?] Show fewer keys"
+        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+R/F5] Find models\nLOG & RUNS  [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nSTATUS      [●] Running   [○] Stopped   [💥] Broken/last launch failed   [V] Vision\nHELP        [h/?] Show fewer keys"
         : "[Enter] Start   [e] Edit   [p] Preview   [n] New   [Ctrl+R/F5] Find models\n[↑/↓] Select   [s] Stop   [H] History   [h/?] All keys   [q] Quit";
     var reserved = 10 + helpHeight + 1;
     if (win.Viewport.Width is > 0 and < 84)
@@ -153,7 +155,7 @@ void UpdateStatus(string message = "")
     var vision = p.Vision ? $"On  ·  {Path.GetFileName(p.Mmproj)}" : "Off";
     var lastRun = summary?.LastRunAt is { } last
         ? $"{(summary.LastExitCode == 0 ? "Success" : $"Failed (exit {summary.LastExitCode})")}  ·  {UiText.RelativeTime(last, DateTimeOffset.Now)}" +
-          (summary.Generation.Latest > 0 ? $"  ·  {summary.Generation.Latest:F1} tok/s" : "")
+          (summary.Generation.Latest > 0 ? $"  ·  output {summary.Generation.Latest:F1} tok/s" : "")
         : "No runs recorded";
     var lines = new List<string>
     {
@@ -169,7 +171,7 @@ void UpdateStatus(string message = "")
         : serverStats.LastHint.Length > 0 ? $"Hint      {serverStats.LastHint}"
         : plan.RemovedArguments.Count > 0 ? $"Warning   Unsupported options removed: {string.Join(", ", plan.RemovedArguments.Select(x => x.OptionName).Distinct(StringComparer.Ordinal))}"
         : !string.IsNullOrWhiteSpace(message) ? $"Info      {message}"
-        : runner.IsActive ? $"Metrics   prompt {serverStats.PromptTokensPerSecond:F1}  ·  gen {serverStats.EvalTokensPerSecond:F1} tok/s  ·  tokens {serverStats.GeneratedTokens}  ·  offload {serverStats.OffloadedLayers}/{serverStats.TotalLayers}"
+        : runner.IsActive ? UiText.RequestMetrics(serverStats)
         : "";
     lines.Add(notice);
     status.Text = string.Join('\n', lines);
@@ -184,6 +186,44 @@ void RefreshLogs()
         : FormatProfileOverview(SelectedProfile());
     if (logAutoScroll) logView.MoveEnd();
     else logView.ScrollTo(new System.Drawing.Point(0, Math.Clamp(logScrollRow, 0, Math.Max(0, logLines.Count - 1))));
+    UpdateLogStatus();
+}
+
+void UpdateLogStatus()
+{
+    var source = runner.IsActive
+        ? $"llama-server stdio → {runner.LogPath}"
+        : externalServer is not null
+            ? string.IsNullOrWhiteSpace(externalServer.LogPath) ? "external llama-server (no readable log file)" : $"external log file → {externalServer.LogPath}"
+            : "no live log source";
+    var mode = logAutoScroll
+        ? "FOLLOWING"
+        : $"PAUSED — End/PgDn resumes · auto-resumes in {Math.Max(0, 60 - (int)(DateTimeOffset.Now - logAutoScrollPausedAt!.Value).TotalSeconds)}s";
+    logStatus.Text = $"LOG  {source}  ·  {mode}";
+}
+
+void PauseLogFollow()
+{
+    if (!logAutoScroll) return;
+    logAutoScroll = false;
+    logAutoScrollPausedAt = DateTimeOffset.Now;
+    logScrollRow = Math.Max(0, logLines.Count - 1);
+    UpdateLogStatus();
+}
+
+void ResumeLogFollow()
+{
+    logAutoScroll = true;
+    logAutoScrollPausedAt = null;
+    logScrollRow = Math.Max(0, logLines.Count - 1);
+    RefreshLogs();
+}
+
+void ResumeLogFollowWhenIdle()
+{
+    if (logAutoScroll || logAutoScrollPausedAt is not { } pausedAt) return;
+    if (DateTimeOffset.Now - pausedAt >= TimeSpan.FromMinutes(1)) ResumeLogFollow();
+    else UpdateLogStatus();
 }
 
 string FormatProfileOverview(Profile? profile)
@@ -442,16 +482,43 @@ app.Keyboard.KeyDown += (_, key) =>
 {
     if (!ReferenceEquals(app.TopRunnableView, win)) return;
     var text = key.AsGrapheme;
-    if (!logAutoScroll && key.KeyCode is KeyCode.PageUp or KeyCode.PageDown or KeyCode.Home or KeyCode.End)
+    var showingLogs = runner.IsActive || externalServer is not null || logLines.Count > 0;
+    if (logView.HasFocus && showingLogs && key.KeyCode is KeyCode.CursorUp or KeyCode.PageUp or KeyCode.Home)
+    {
+        PauseLogFollow();
+        logScrollRow = key.KeyCode switch
+        {
+            KeyCode.Home => 0,
+            KeyCode.PageUp => Math.Max(0, logScrollRow - 10),
+            _ => Math.Max(0, logScrollRow - 1)
+        };
+        logView.ScrollTo(new System.Drawing.Point(0, logScrollRow));
+        UpdateStatus($"Log follow paused at row {logScrollRow + 1}/{Math.Max(1, logLines.Count)}.");
+        key.Handled = true;
+    }
+    else if (logView.HasFocus && !logAutoScroll && key.KeyCode is KeyCode.CursorUp or KeyCode.CursorDown or KeyCode.PageUp or KeyCode.PageDown or KeyCode.Home or KeyCode.End)
     {
         logScrollRow = key.KeyCode switch
         {
             KeyCode.PageUp => Math.Max(0, logScrollRow - 10),
             KeyCode.PageDown => Math.Min(Math.Max(0, logLines.Count - 1), logScrollRow + 10),
             KeyCode.Home => 0,
+            KeyCode.CursorUp => Math.Max(0, logScrollRow - 1),
+            KeyCode.CursorDown => Math.Min(Math.Max(0, logLines.Count - 1), logScrollRow + 1),
             _ => Math.Max(0, logLines.Count - 1)
         };
-        logView.ScrollTo(new System.Drawing.Point(0, logScrollRow)); UpdateStatus($"Log row {logScrollRow + 1}/{Math.Max(1, logLines.Count)}."); key.Handled = true;
+        if (logScrollRow >= Math.Max(0, logLines.Count - 1))
+        {
+            ResumeLogFollow();
+            UpdateStatus("Log follow resumed at the bottom.");
+        }
+        else
+        {
+            logView.ScrollTo(new System.Drawing.Point(0, logScrollRow));
+            UpdateLogStatus();
+            UpdateStatus($"Log follow paused at row {logScrollRow + 1}/{Math.Max(1, logLines.Count)}.");
+        }
+        key.Handled = true;
     }
     else if (key.KeyCode == KeyCode.Enter) { _ = Launch(); key.Handled = true; }
     else if (text == "s") { _ = Stop(false); key.Handled = true; }
@@ -476,9 +543,7 @@ app.Keyboard.KeyDown += (_, key) =>
     }
     else if (text.Equals("l", StringComparison.OrdinalIgnoreCase))
     {
-        logAutoScroll = !logAutoScroll;
-        logScrollRow = Math.Max(0, logLines.Count - 1);
-        if (logAutoScroll) logView.MoveEnd(); else logView.ScrollTo(new System.Drawing.Point(0, logScrollRow));
+        if (logAutoScroll) PauseLogFollow(); else ResumeLogFollow();
         UpdateStatus($"Log auto-scroll = {logAutoScroll}."); key.Handled = true;
     }
     else if (text == "H")
@@ -504,6 +569,7 @@ _ = Task.Run(async () =>
             var update = externalMonitor.Poll();
             app.Invoke(() =>
             {
+                ResumeLogFollowWhenIdle();
                 if (runner.IsActive) return;
                 var changed = externalServer?.Pid != update.Server?.Pid;
                 externalServer = update.Server;

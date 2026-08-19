@@ -35,4 +35,17 @@ static class UiText
         return value.LocalDateTime.ToString("yyyy-MM-dd");
     }
 
+    public static string RequestMetrics(ServerStats stats)
+    {
+        var metrics = new List<string>();
+        if (stats.PromptTokensPerSecond > 0) metrics.Add($"input {stats.PromptTokensPerSecond:F1} tok/s");
+        if (stats.EvalTokensPerSecond > 0) metrics.Add($"output {stats.EvalTokensPerSecond:F1} tok/s");
+        if (stats.GeneratedTokens > 0) metrics.Add($"{stats.GeneratedTokens:N0} output tokens");
+        if (stats.TotalLayers > 0) metrics.Add($"GPU layers {stats.OffloadedLayers}/{stats.TotalLayers}");
+
+        return metrics.Count == 0
+            ? "Request stats  Waiting for the first request…"
+            : $"Latest request  {string.Join("  ·  ", metrics)}";
+    }
+
 }
