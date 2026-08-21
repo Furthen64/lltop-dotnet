@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Globalization;
 using Terminal.Gui;
 using Terminal.Gui.App;
@@ -32,6 +33,9 @@ DateTimeOffset? logAutoScrollPausedAt = null;
 var expandedHelp = false;
 var externalMonitor = new ExternalServerMonitor(cfg);
 ExternalServer? externalServer = null;
+var benchmarkActive = false;
+CancellationTokenSource? benchmarkCancellation = null;
+BenchmarkRecord? activeBenchmark = null;
 var resourceGpuBackend = "";
 var resourceGpuName = "";
 using var monitorCancellation = new CancellationTokenSource();
@@ -57,16 +61,21 @@ LltopTheme.Apply([profileFrame, logFrame, statusFrame], banner, profileList, log
 ISystemResourceProvider resourceProvider = OperatingSystem.IsLinux()
     ? new LinuxSystemResourceProvider(
         () => (resourceGpuBackend, resourceGpuName),
-        () => runner.State == RunnerState.Running || externalServer is not null ? 1 : 0)
-    : new UnavailableSystemResourceProvider(() => runner.State == RunnerState.Running || externalServer is not null ? 1 : 0);
+        () => runner.State == RunnerState.Running || externalServer is not null || benchmarkActive ? 1 : 0)
+    : new UnavailableSystemResourceProvider(() => runner.State == RunnerState.Running || externalServer is not null || benchmarkActive ? 1 : 0);
+var benchmarkRunner = new BenchmarkRunner(
+    cfg,
+    profile => LaunchPlanFor(profile, CapabilitiesFor(profile)),
+    () => runner.IsActive || externalServer is not null,
+    resourceProvider);
 
 void ApplyLayout()
 {
     var helpHeight = expandedHelp ? 6 : 2;
     help.Height = helpHeight;
     help.Text = expandedHelp
-        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+R/F5] Find models\nLOG & RUNS  [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nSTATUS      [●] Running   [○] Stopped   [💥] Broken/last launch failed   [V] Vision\nHELP        [h/?] Show fewer keys"
-        : "[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [p] Preview\n[↑/↓] Select   [s] Stop   [H] History   [h/?] All keys   [q] Quit";
+        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+R/F5] Find models\nBENCHMARK   [b] Setup/start   [B] Cancel   idle server required   reports → benchmarks_dir\nLOG & RUNS  [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nHELP        [h/?] Show fewer keys"
+        : "[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [b] Benchmark\n[↑/↓] Select   [s] Stop   [H] History   [h/?] All keys   [q] Quit";
     var reserved = 10 + helpHeight + 1;
     if (win.Viewport.Width is > 0 and < 84)
     {
@@ -184,14 +193,53 @@ void UpdateStatus(string message = "")
 
 void RefreshLogs()
 {
-    var showingLogs = runner.IsActive || externalServer is not null || logLines.Count > 0;
-    logFrame.Title = showingLogs ? " Live log " : " Profile overview ";
-    logView.Text = showingLogs
+    var showingBenchmark = benchmarkActive && activeBenchmark is not null;
+    var showingLogs = !showingBenchmark && (runner.IsActive || externalServer is not null || logLines.Count > 0);
+    logFrame.Title = showingBenchmark ? " Benchmark progress " : showingLogs ? " Live log " : " Profile overview ";
+    logView.Text = showingBenchmark
+        ? FormatBenchmarkProgress(activeBenchmark!)
+        : showingLogs
         ? logLines.Count == 0 ? "Starting server; waiting for output…" : string.Join('\n', logLines)
         : FormatProfileOverview(SelectedProfile());
     if (logAutoScroll) logView.MoveEnd();
     else logView.ScrollTo(new System.Drawing.Point(0, Math.Clamp(logScrollRow, 0, Math.Max(0, logLines.Count - 1))));
     UpdateLogStatus();
+}
+
+string FormatBenchmarkProgress(BenchmarkRecord benchmark)
+{
+    var completed = benchmark.Cases.Count(x => x.Status is not BenchmarkCaseStatus.Pending and not BenchmarkCaseStatus.Running);
+    var running = benchmark.Cases.FirstOrDefault(x => x.Status == BenchmarkCaseStatus.Running);
+    var elapsed = DateTimeOffset.Now - benchmark.StartedAt;
+    var lines = new List<string>
+    {
+        $"Running benchmark for {benchmark.ProfileName}",
+        $"Progress      {completed}/{benchmark.Cases.Count} cases completed",
+        $"Current       {running?.Label ?? "finishing"}",
+        $"Elapsed       {elapsed:hh\\:mm\\:ss}",
+        $"OOM policy    {benchmark.OomPolicy}",
+        "",
+        "Cases"
+    };
+    lines.AddRange(benchmark.Cases.Select(item =>
+    {
+        var marker = item.Status switch
+        {
+            BenchmarkCaseStatus.Completed => "✓",
+            BenchmarkCaseStatus.Running => "●",
+            BenchmarkCaseStatus.Failed or BenchmarkCaseStatus.OutOfMemory => "!",
+            BenchmarkCaseStatus.Cancelled => "×",
+            BenchmarkCaseStatus.Skipped => "–",
+            _ => "○"
+        };
+        var detail = item.Status == BenchmarkCaseStatus.Running && item.StartedAt is { } started
+            ? $"  {DateTimeOffset.Now - started:mm\\:ss}"
+            : item.TelemetryAvailable ? $"  {item.VramUsedBytes.GetValueOrDefault() / 1024d / 1024d:F1} MiB"
+            : item.Error.Length > 0 ? $"  {item.Error}" : "";
+        return $" {marker} {item.Label,-28} {item.Status}{detail}";
+    }));
+    lines.Add("\nPress B to cancel. Benchmark processes are not added to run history.");
+    return string.Join('\n', lines);
 }
 
 void UpdateLogStatus()
@@ -410,6 +458,62 @@ async Task Stop(bool force)
     if (force) await runner.KillAsync(); else await runner.StopAsync();
 }
 
+async Task RunBenchmark()
+{
+    if (benchmarkActive) { UpdateStatus("A benchmark is already running. Press B to cancel it."); return; }
+    if (runner.IsActive || externalServer is not null) { UpdateStatus("Stop the active llama-server before starting a benchmark."); return; }
+    var profile = SelectedProfile();
+    if (profile is null) { UpdateStatus("Select a profile before starting a benchmark."); return; }
+    var setup = ShowBenchmarkSetup(app, profile);
+    if (setup is null) return;
+    try
+    {
+        var benchmark = new BenchmarkRecord
+        {
+            BenchmarkId = $"{DateTimeOffset.Now:yyyyMMdd_HHmmss}_{ProfileStore.Slugify(profile.Name)}",
+            ProfileName = profile.Name,
+            BaselineProfile = profile.Copy(profile.Name),
+            StartedAt = DateTimeOffset.Now,
+            Workload = setup.Workload,
+            OomPolicy = setup.OomPolicy,
+            Sweeps = setup.Sweeps
+        };
+        // Generate before starting so invalid settings are caught in the setup flow.
+        benchmark.Cases = BenchmarkCases.Generate(benchmark.BaselineProfile, benchmark.Sweeps);
+        benchmarkActive = true;
+        activeBenchmark = benchmark;
+        benchmarkCancellation = new CancellationTokenSource();
+        UpdateStatus($"Benchmark started: 0/{benchmark.Cases.Count} cases. Press B to cancel.");
+        RefreshLogs();
+        await benchmarkRunner.RunAsync(benchmark, update => app.Invoke(() =>
+        {
+            var completed = update.Cases.Count(x => x.Status is not BenchmarkCaseStatus.Pending and not BenchmarkCaseStatus.Running);
+            UpdateStatus($"Benchmark {completed}/{update.Cases.Count}: {update.Cases.FirstOrDefault(x => x.Status == BenchmarkCaseStatus.Running)?.Label ?? update.Status.ToString()}");
+            RefreshLogs();
+        }), benchmarkCancellation.Token);
+        app.Invoke(() =>
+        {
+            UpdateStatus($"Benchmark {benchmark.Status}. Reports: {benchmark.HtmlReport}");
+            ShowBenchmarkResults(app, benchmark);
+        });
+    }
+    catch (Exception ex) { app.Invoke(() => UpdateStatus($"Benchmark failed: {ex.Message}")); }
+    finally
+    {
+        benchmarkCancellation?.Dispose(); benchmarkCancellation = null;
+        benchmarkActive = false;
+        activeBenchmark = null;
+        app.Invoke(RefreshLogs);
+    }
+}
+
+void CancelBenchmark()
+{
+    if (benchmarkCancellation is null) { UpdateStatus("No benchmark is running."); return; }
+    benchmarkCancellation.Cancel();
+    UpdateStatus("Cancelling benchmark and stopping its server…");
+}
+
 void NewProfile()
 {
     var p = Profile.CreateDefault(cfg, store.UniqueName("new-profile"));
@@ -456,6 +560,7 @@ async Task Quit()
         if (answer != 1) return;
     }
     closing = true;
+    benchmarkCancellation?.Cancel();
     monitorCancellation.Cancel();
     await runner.StopAsync();
     app.RequestStop();
@@ -547,6 +652,8 @@ app.Keyboard.KeyDown += (_, key) =>
         UpdateStatus(command.Length > 0 && app.Clipboard?.TrySetClipboardData(command) == true ? "Copied launch command to clipboard." : "Clipboard is unavailable.");
         key.Handled = true;
     }
+    else if (text == "b") { _ = RunBenchmark(); key.Handled = true; }
+    else if (text == "B") { CancelBenchmark(); key.Handled = true; }
     else if (text.Equals("l", StringComparison.OrdinalIgnoreCase))
     {
         if (logAutoScroll) PauseLogFollow(); else ResumeLogFollow();
@@ -576,7 +683,7 @@ _ = Task.Run(async () =>
             app.Invoke(() =>
             {
                 ResumeLogFollowWhenIdle();
-                if (runner.IsActive) return;
+                if (runner.IsActive || benchmarkActive) return;
                 var changed = externalServer?.Pid != update.Server?.Pid;
                 externalServer = update.Server;
                 foreach (var line in update.Lines)
@@ -943,6 +1050,109 @@ static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
     cancel.Accepting += (_, _) => app.RequestStop();
     app.Run(wizard);
     return completed;
+}
+
+static BenchmarkSetup? ShowBenchmarkSetup(IApplication app, Profile profile)
+{
+    BenchmarkSetup? setup = null;
+    var dialog = new Window { Title = $" Benchmark setup · {profile.Name} ", Width = 92, Height = 17 };
+    dialog.KeyDown += (_, key) => { if (key.KeyCode == KeyCode.Esc) { app.RequestStop(); key.Handled = true; } };
+    dialog.Add(new Label { X = 2, Y = 1, Text = "Sweeps (one per line: ctx=4096:8192 or cache_k=q4_0,q8_0)" });
+#pragma warning disable CS0618
+    var sweeps = new TextView { X = 2, Y = 2, Width = Dim.Fill(4), Height = 5, Text = $"ctx={Math.Max(1, profile.Ctx / 2)}:{profile.Ctx * 2}" };
+#pragma warning restore CS0618
+    dialog.Add(sweeps);
+    dialog.Add(new Label { X = 2, Y = 8, Text = "Warmup prompt" });
+    var prompt = new TextField { X = 17, Y = 8, Width = Dim.Fill(4), Text = "Reply with a short benchmark acknowledgement." };
+    dialog.Add(prompt);
+    dialog.Add(new Label { X = 2, Y = 10, Text = "Max tokens" });
+    var maxTokens = new TextField { X = 17, Y = 10, Width = 8, Text = "32" };
+    var continueOom = new CheckBox { X = 30, Y = 10, Text = "Continue after OOM" };
+    var message = new Label { X = 2, Y = 12, Width = Dim.Fill(4), Text = "Requires no active managed or external llama-server. Readiness timeout is 300 seconds." };
+    var start = new Button { X = 2, Y = 14, Text = "Start benchmark", IsDefault = true };
+    var cancel = new Button { X = Pos.Right(start) + 2, Y = 14, Text = "Cancel" };
+    start.Accepting += (_, _) =>
+    {
+        try
+        {
+            if (!int.TryParse(maxTokens.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var tokens)) throw new InvalidOperationException("Max tokens must be an integer.");
+            var workload = new BenchmarkWorkload { Prompt = prompt.Text.Trim(), MaxTokens = tokens };
+            workload.Validate();
+            setup = new(ParseBenchmarkSweeps(sweeps.Text), workload, continueOom.Value == CheckState.Checked ? BenchmarkOomPolicy.Continue : BenchmarkOomPolicy.Stop);
+            if (setup.Sweeps.Count == 0) throw new InvalidOperationException("Enter at least one sweep.");
+            app.RequestStop();
+        }
+        catch (Exception ex) { message.Text = ex.Message; }
+    };
+    cancel.Accepting += (_, _) => app.RequestStop();
+    dialog.Add(prompt, maxTokens, continueOom, message, start, cancel);
+    app.Run(dialog);
+    return setup;
+}
+
+static List<BenchmarkSweep> ParseBenchmarkSweeps(string text)
+{
+    var sweeps = new List<BenchmarkSweep>();
+    foreach (var raw in text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+    {
+        var equals = raw.IndexOf('=');
+        if (equals < 1) throw new InvalidOperationException($"Invalid sweep '{raw}'. Use setting=min:max or setting=value,value.");
+        var setting = raw[..equals].Trim();
+        var values = raw[(equals + 1)..].Trim();
+        if (values.Contains(':'))
+        {
+            var range = values.Split(':', StringSplitOptions.TrimEntries);
+            if (range.Length != 2) throw new InvalidOperationException($"Invalid range '{raw}'.");
+            sweeps.Add(new() { Setting = setting, Minimum = range[0], Maximum = range[1] });
+        }
+        else sweeps.Add(new() { Setting = setting, Values = values.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList() });
+    }
+    return sweeps;
+}
+
+static void ShowBenchmarkResults(IApplication app, BenchmarkRecord benchmark)
+{
+    var window = new Window { Title = $" Benchmark results · {benchmark.ProfileName} ", Width = Dim.Percent(90), Height = Dim.Percent(80) };
+    window.KeyDown += (_, key) => { if (key.KeyCode == KeyCode.Esc || key.AsGrapheme.Equals("q", StringComparison.OrdinalIgnoreCase)) { app.RequestStop(); key.Handled = true; } };
+#pragma warning disable CS0618
+    var warnings = benchmark.Cases.Where(x => BenchmarkReport.Headroom(x).StartsWith("WARNING", StringComparison.Ordinal) || BenchmarkReport.Headroom(x).StartsWith("CRITICAL", StringComparison.Ordinal)).ToList();
+    var peak = benchmark.Cases.Where(x => x.VramUsedBytes.HasValue).OrderByDescending(x => x.VramUsedBytes).FirstOrDefault();
+    var lines = new List<string>
+    {
+        $"Status       {benchmark.Status}",
+        $"Cases        {benchmark.Cases.Count(x => x.Status == BenchmarkCaseStatus.Completed)}/{benchmark.Cases.Count} completed",
+        $"Peak VRAM    {(peak is null ? "unavailable" : $"{peak.Label} · {BenchmarkReport.FormatVram(peak)}")}",
+        $"Risk         {(warnings.Count == 0 ? "No close-to-OOM cases detected." : $"{warnings.Count} close-to-OOM case(s) — see ! rows below.")}",
+        "",
+        "CASE                         STATUS        POST-WARMUP VRAM                 HEADROOM / RISK",
+        new string('─', 92)
+    };
+    lines.AddRange(benchmark.Cases.Select(x => $"{x.Label,-28} {x.Status,-13} {BenchmarkReport.FormatVram(x),-34} {BenchmarkReport.Headroom(x)}{(x.Error.Length > 0 ? $"  {x.Error}" : "")}"));
+    lines.AddRange(["", "Reports", $"HTML  {benchmark.HtmlReport}", $"JSON  {benchmark.JsonReport}", "", "Close-to-OOM means peak sampled VRAM was at least 80% of reported total GPU VRAM."]);
+    var results = new TextView { X = 1, Y = 1, Width = Dim.Fill(2), Height = Dim.Fill(3), ReadOnly = true, WordWrap = true,
+        Text = string.Join('\n', lines) };
+#pragma warning restore CS0618
+    LltopTheme.ApplyAnalysis(results);
+    var openReport = new Button { X = 1, Y = Pos.Bottom(results), Text = "Open HTML report" };
+    openReport.Accepting += (_, _) =>
+    {
+        try { LaunchBenchmarkReport(benchmark.HtmlReport); }
+        catch (Exception ex) { MessageBox.ErrorQuery(app, "Open benchmark report", ex.Message, "OK"); }
+    };
+    var close = new Button { X = Pos.Right(openReport) + 2, Y = Pos.Bottom(results), Text = "Close", IsDefault = true };
+    close.Accepting += (_, _) => app.RequestStop();
+    window.Add(results, openReport, close); app.Run(window);
+}
+
+static void LaunchBenchmarkReport(string reportPath)
+{
+    if (string.IsNullOrWhiteSpace(reportPath) || !File.Exists(reportPath))
+        throw new FileNotFoundException("The generated HTML report was not found.", reportPath);
+    ProcessStartInfo startInfo;
+    if (OperatingSystem.IsWindows()) startInfo = new ProcessStartInfo { FileName = reportPath, UseShellExecute = true };
+    else if (OperatingSystem.IsMacOS()) startInfo = new ProcessStartInfo { FileName = "open", UseShellExecute = false, ArgumentList = { reportPath } };
+    else startInfo = new ProcessStartInfo { FileName = "xdg-open", UseShellExecute = false, ArgumentList = { reportPath } };
+    if (Process.Start(startInfo) is null) throw new InvalidOperationException("Could not launch the default browser.");
 }
 
 ServerCapabilityRecord CapabilitiesFor(Profile profile)
