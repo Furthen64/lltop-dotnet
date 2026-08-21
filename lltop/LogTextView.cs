@@ -11,6 +11,9 @@ internal sealed class LogTextView : TextView
     private Color styledForeground;
 
     internal TuiAttribute PanelAttribute { get; set; } = TuiAttribute.Default;
+    // Benchmark result tables use this to keep their columns calm while making
+    // only operational severity words stand out.
+    internal bool HighlightSeverityMarkersOnly { get; set; }
 
     protected override void OnDrawReadOnlyColor(List<Cell> line, int idxCol, int idxRow)
     {
@@ -20,6 +23,9 @@ internal sealed class LogTextView : TextView
             styledForeground = LogLineStyle.ForegroundFor(Cell.ToString(line)) ?? PanelAttribute.Foreground;
         }
 
-        SetAttribute(new TuiAttribute(styledForeground, PanelAttribute.Background));
+        var foreground = HighlightSeverityMarkersOnly
+            ? LogLineStyle.InlineSeverityColor(Cell.ToString(line), idxCol) ?? PanelAttribute.Foreground
+            : styledForeground;
+        SetAttribute(new TuiAttribute(foreground, PanelAttribute.Background));
     }
 }

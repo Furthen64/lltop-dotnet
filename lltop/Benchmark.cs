@@ -45,6 +45,7 @@ internal sealed class BenchmarkCase
     [JsonPropertyName("ended_at")] public DateTimeOffset? EndedAt { get; set; }
     [JsonPropertyName("error")] public string Error { get; set; } = "";
     [JsonPropertyName("telemetry_available")] public bool TelemetryAvailable { get; set; }
+    [JsonPropertyName("pre_warmup_vram_used_bytes")] public long? PreWarmupVramUsedBytes { get; set; }
     [JsonPropertyName("vram_samples_bytes")] public List<long> VramSamplesBytes { get; set; } = [];
     [JsonPropertyName("vram_used_bytes")] public long? VramUsedBytes { get; set; }
     [JsonPropertyName("vram_total_bytes")] public long? VramTotalBytes { get; set; }
@@ -179,8 +180,8 @@ internal static class BenchmarkReport
     public static string Html(BenchmarkRecord benchmark)
     {
         var json = JsonSerializer.Serialize(benchmark, new JsonSerializerOptions { Encoder = JavaScriptEncoder.Default });
-        var rows = string.Join("", benchmark.Cases.Select(c => $"<tr><td>{E(c.Label)}</td><td>{E(c.Status.ToString())}</td><td>{E(FormatVram(c))}</td><td>{E(Headroom(c))}</td><td>{E(c.Error)}</td></tr>"));
-        return $"<!doctype html><html><head><meta charset=\"utf-8\"><title>lltop benchmark {E(benchmark.ProfileName)}</title><style>body{{font:16px system-ui;margin:2rem;color:#1f2937}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #d1d5db;padding:.5rem;text-align:left}}th{{background:#f3f4f6}}.warning{{color:#a16207;font-weight:600}}code{{white-space:pre-wrap}}</style></head><body><h1>Benchmark: {E(benchmark.ProfileName)}</h1><p>Status: <b>{E(benchmark.Status.ToString())}</b> · Started: {E(benchmark.StartedAt.LocalDateTime.ToString("u"))}</p><p>Workload: {E(benchmark.Workload.Prompt)} · max tokens {benchmark.Workload.MaxTokens}</p><table><thead><tr><th>Case</th><th>Status</th><th>Post-warmup VRAM</th><th>Headroom / risk</th><th>Error</th></tr></thead><tbody>{rows}</tbody></table><h2>Embedded data</h2><code id=\"data\"></code><script>document.getElementById('data').textContent=JSON.stringify({json},null,2);</script></body></html>";
+        var rows = string.Join("", benchmark.Cases.Select(c => $"<tr><td>{E(c.Label)}</td><td>{E(c.Status.ToString())}</td><td>{E(c.PreWarmupVramUsedBytes is null ? "unavailable" : FormatBytes(c.PreWarmupVramUsedBytes))}</td><td>{E(FormatVram(c))}</td><td>{E(FreeVram(c))}</td><td class=\"{Risk(c).ToLowerInvariant()}\">{E(Risk(c))}</td><td>{E(c.Error)}</td></tr>"));
+        return $"<!doctype html><html><head><meta charset=\"utf-8\"><title>lltop benchmark {E(benchmark.ProfileName)}</title><style>body{{font:16px system-ui;margin:2rem;color:#1f2937}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #d1d5db;padding:.5rem;text-align:left}}th{{background:#f3f4f6}}.warning{{color:#a16207;font-weight:700}}.critical{{color:#dc2626;font-weight:700}}.normal{{color:#15803d;font-weight:700}}code{{white-space:pre-wrap}}</style></head><body><h1>Benchmark: {E(benchmark.ProfileName)}</h1><p>Status: <b>{E(benchmark.Status.ToString())}</b> · Started: {E(benchmark.StartedAt.LocalDateTime.ToString("u"))}</p><p>Workload: {E(benchmark.Workload.Prompt)} · max tokens {benchmark.Workload.MaxTokens}</p><table><thead><tr><th>Case</th><th>Status</th><th>Pre-Warmup VRAM</th><th>Post-Warmup VRAM</th><th>Free-VRAM</th><th>Risk</th><th>Error</th></tr></thead><tbody>{rows}</tbody></table><h2>Embedded data</h2><code id=\"data\"></code><script>document.getElementById('data').textContent=JSON.stringify({json},null,2);</script></body></html>";
     }
 
     static string E(string? value) => System.Net.WebUtility.HtmlEncode(value ?? "");
@@ -191,9 +192,45 @@ internal static class BenchmarkReport
     internal static string Headroom(BenchmarkCase item)
     {
         if (!item.TelemetryAvailable || item.VramTotalBytes is not > 0) return "total unavailable";
-        var usedPercent = item.VramUsedBytes.GetValueOrDefault() * 100d / item.VramTotalBytes.Value;
         var free = FormatBytes(Math.Max(0, item.VramTotalBytes.Value - item.VramUsedBytes.GetValueOrDefault()));
-        return usedPercent >= 90 ? $"CRITICAL: {free} free" : usedPercent >= 80 ? $"WARNING: {free} free" : $"{free} free";
+        return Risk(item) is "CRITICAL" ? $"CRITICAL: {free} free" : Risk(item) is "WARNING" ? $"WARNING: {free} free" : $"{free} free";
+    }
+
+    internal static string Risk(BenchmarkCase item)
+    {
+        if (!item.TelemetryAvailable || item.VramTotalBytes is not > 0) return "UNAVAILABLE";
+        var usedPercent = item.VramUsedBytes.GetValueOrDefault() * 100d / item.VramTotalBytes.Value;
+        return usedPercent >= 90 ? "CRITICAL" : usedPercent >= 80 ? "WARNING" : "NORMAL";
+    }
+
+    internal static string FreeVram(BenchmarkCase item) => !item.TelemetryAvailable || item.VramTotalBytes is not > 0
+        ? "unavailable"
+        : FormatBytes(Math.Max(0, item.VramTotalBytes.Value - item.VramUsedBytes.GetValueOrDefault()));
+
+    internal static string MemoryPosture(BenchmarkRecord benchmark, BenchmarkCase? peak)
+    {
+        if (benchmark.Cases.Any(x => x.Status == BenchmarkCaseStatus.OutOfMemory && x.Profile.Ngl >= 99))
+            return "PARTIAL OFFLOAD REQUIRED · full GPU baseline did not complete";
+        if (peak is null || !peak.TelemetryAvailable || peak.VramTotalBytes is not > 0)
+            return peak?.Profile.Ngl < 99 ? "PARTIAL OFFLOAD · VRAM total unavailable" : "FULLY ON GPU · VRAM total unavailable";
+        var headroom = Headroom(peak);
+        if (peak.Profile.Ngl < 99) return $"PARTIAL OFFLOAD · {headroom}";
+        var usedPercent = peak.VramUsedBytes.GetValueOrDefault() * 100d / peak.VramTotalBytes.Value;
+        return usedPercent >= 90 ? $"FULLY ON GPU · CRITICAL · {headroom}"
+            : usedPercent >= 80 ? $"FULLY ON GPU · TIGHT · {headroom}"
+            : $"FULLY ON GPU · HEALTHY · {headroom}";
+    }
+
+    internal static string ProgressVramDetail(BenchmarkCase item)
+    {
+        if (!item.TelemetryAvailable || item.VramUsedBytes is null) return "post-warmup VRAM unavailable";
+        var used = item.VramUsedBytes.Value / 1024d / 1024d / 1024d;
+        if (item.VramTotalBytes is not > 0) return $"post-warmup peak VRAM {used:F1} GiB (total unavailable)";
+        var total = item.VramTotalBytes.Value / 1024d / 1024d / 1024d;
+        var percentage = item.VramUsedBytes.Value * 100d / item.VramTotalBytes.Value;
+        var free = Math.Max(0, item.VramTotalBytes.Value - item.VramUsedBytes.Value) / 1024d / 1024d / 1024d;
+        var risk = percentage >= 90 ? "CRITICAL" : percentage >= 80 ? "WARNING" : "headroom";
+        return $"post-warmup peak VRAM {used:F1}/{total:F1} GiB ({percentage:F0}%) · {risk}: {free:F1} GiB free";
     }
 }
 
@@ -250,6 +287,9 @@ internal sealed class BenchmarkRunner
             await runner.StartAsync(createPlan(item.Profile), item.Profile, config);
             item.ServerLogPath = runner.LogPath;
             await WaitReadyAsync(item.Profile, runner, cancellationToken);
+            var preWarmup = await telemetry.GetSnapshotAsync(cancellationToken);
+            item.PreWarmupVramUsedBytes = preWarmup.VramUsedBytes;
+            item.VramTotalBytes ??= preWarmup.VramTotalBytes;
             await WarmupAsync(item.Profile, workload, cancellationToken);
             var until = DateTimeOffset.Now.AddSeconds(10);
             while (DateTimeOffset.Now < until)

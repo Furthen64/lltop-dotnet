@@ -10,6 +10,7 @@ using Terminal.Gui.Views;
 
 using var app = Application.Create().Init();
 var cfg = AppConfig.Load();
+var knownTheme = LltopTheme.Select(cfg.Theme);
 if (cfg.IsFirstRun && !RunFirstRunWizard(app, cfg)) return;
 
 var store = new ProfileStore(cfg.ProfilesDir);
@@ -234,7 +235,7 @@ string FormatBenchmarkProgress(BenchmarkRecord benchmark)
         };
         var detail = item.Status == BenchmarkCaseStatus.Running && item.StartedAt is { } started
             ? $"  {DateTimeOffset.Now - started:mm\\:ss}"
-            : item.TelemetryAvailable ? $"  {item.VramUsedBytes.GetValueOrDefault() / 1024d / 1024d:F1} MiB"
+            : item.TelemetryAvailable ? $"  {BenchmarkReport.ProgressVramDetail(item)}"
             : item.Error.Length > 0 ? $"  {item.Error}" : "";
         return $" {marker} {item.Label,-28} {item.Status}{detail}";
     }));
@@ -671,7 +672,7 @@ app.Keyboard.KeyDown += (_, key) =>
 };
 
 RefreshLogs();
-var startupMessage = removedLegacyStarter ? "Removed the obsolete empty starter profile." : cfg.LoadMessage;
+var startupMessage = !knownTheme ? $"Unknown theme '{cfg.Theme}'; using Midnight." : removedLegacyStarter ? "Removed the obsolete empty starter profile." : cfg.LoadMessage;
 UpdateStatus(load.Errors.Count == 0 ? startupMessage : $"Skipped invalid profiles: {string.Join(" | ", load.Errors)}");
 _ = Task.Run(async () =>
 {
@@ -1114,13 +1115,13 @@ static void ShowBenchmarkResults(IApplication app, BenchmarkRecord benchmark)
 {
     var window = new Window { Title = $" Benchmark results · {benchmark.ProfileName} ", Width = Dim.Percent(90), Height = Dim.Percent(80) };
     window.KeyDown += (_, key) => { if (key.KeyCode == KeyCode.Esc || key.AsGrapheme.Equals("q", StringComparison.OrdinalIgnoreCase)) { app.RequestStop(); key.Handled = true; } };
-#pragma warning disable CS0618
     var warnings = benchmark.Cases.Where(x => BenchmarkReport.Headroom(x).StartsWith("WARNING", StringComparison.Ordinal) || BenchmarkReport.Headroom(x).StartsWith("CRITICAL", StringComparison.Ordinal)).ToList();
     var peak = benchmark.Cases.Where(x => x.VramUsedBytes.HasValue).OrderByDescending(x => x.VramUsedBytes).FirstOrDefault();
     var lines = new List<string>
     {
         $"Status       {benchmark.Status}",
         $"Cases        {benchmark.Cases.Count(x => x.Status == BenchmarkCaseStatus.Completed)}/{benchmark.Cases.Count} completed",
+        $"Memory fit   {BenchmarkReport.MemoryPosture(benchmark, peak)}",
         $"Peak VRAM    {(peak is null ? "unavailable" : $"{peak.Label} · {BenchmarkReport.FormatVram(peak)}")}",
         $"Risk         {(warnings.Count == 0 ? "No close-to-OOM cases detected." : $"{warnings.Count} close-to-OOM case(s) — see ! rows below.")}",
         "",
@@ -1129,9 +1130,8 @@ static void ShowBenchmarkResults(IApplication app, BenchmarkRecord benchmark)
     };
     lines.AddRange(benchmark.Cases.Select(x => $"{x.Label,-28} {x.Status,-13} {BenchmarkReport.FormatVram(x),-34} {BenchmarkReport.Headroom(x)}{(x.Error.Length > 0 ? $"  {x.Error}" : "")}"));
     lines.AddRange(["", "Reports", $"HTML  {benchmark.HtmlReport}", $"JSON  {benchmark.JsonReport}", "", "Close-to-OOM means peak sampled VRAM was at least 80% of reported total GPU VRAM."]);
-    var results = new TextView { X = 1, Y = 1, Width = Dim.Fill(2), Height = Dim.Fill(3), ReadOnly = true, WordWrap = true,
-        Text = string.Join('\n', lines) };
-#pragma warning restore CS0618
+    var results = new LogTextView { X = 1, Y = 1, Width = Dim.Fill(2), Height = Dim.Fill(3), ReadOnly = true, WordWrap = true,
+        Text = string.Join('\n', lines), HighlightSeverityMarkersOnly = true };
     LltopTheme.ApplyAnalysis(results);
     var openReport = new Button { X = 1, Y = Pos.Bottom(results), Text = "Open HTML report" };
     openReport.Accepting += (_, _) =>

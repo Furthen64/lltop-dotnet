@@ -54,6 +54,9 @@ public sealed class BenchmarkTests
         Assert.Contains("&lt;unsafe&gt;", html);
         Assert.DoesNotContain("<script>alert(1)</script>", html);
         Assert.Contains("Embedded data", html);
+        Assert.Contains("Pre-Warmup VRAM", html);
+        Assert.Contains("Post-Warmup VRAM", html);
+        Assert.Contains("Free-VRAM", html);
     }
 
     [Fact]
@@ -65,6 +68,21 @@ public sealed class BenchmarkTests
         Assert.StartsWith("WARNING", BenchmarkReport.Headroom(warning));
         Assert.StartsWith("CRITICAL", BenchmarkReport.Headroom(critical));
         Assert.Contains("81%", BenchmarkReport.FormatVram(warning));
+        Assert.Contains("post-warmup peak VRAM 0.0/0.0 GiB (81%)", BenchmarkReport.ProgressVramDetail(warning));
+        Assert.Equal("WARNING", BenchmarkReport.Risk(warning));
+        Assert.Equal("NORMAL", BenchmarkReport.Risk(new BenchmarkCase { TelemetryAvailable = true, VramUsedBytes = 7, VramTotalBytes = 16 }));
+    }
+
+    [Fact]
+    public void MemoryPosture_SeparatesHealthyTightAndPartialOffload()
+    {
+        var healthy = new BenchmarkCase { TelemetryAvailable = true, VramUsedBytes = 10, VramTotalBytes = 16, Profile = new Profile { Ngl = 99 } };
+        var tight = new BenchmarkCase { TelemetryAvailable = true, VramUsedBytes = 14, VramTotalBytes = 16, Profile = new Profile { Ngl = 99 } };
+        var partial = new BenchmarkRecord { Cases = [new BenchmarkCase { Status = BenchmarkCaseStatus.OutOfMemory, Profile = new Profile { Ngl = 99 } }] };
+
+        Assert.Contains("HEALTHY", BenchmarkReport.MemoryPosture(new BenchmarkRecord(), healthy));
+        Assert.Contains("TIGHT", BenchmarkReport.MemoryPosture(new BenchmarkRecord(), tight));
+        Assert.StartsWith("PARTIAL OFFLOAD REQUIRED", BenchmarkReport.MemoryPosture(partial, null));
     }
 
     [Fact]

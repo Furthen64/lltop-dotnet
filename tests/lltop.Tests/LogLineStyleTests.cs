@@ -30,6 +30,18 @@ public sealed class LogLineStyleTests
         Assert.Equal(LogLineKind.Warning, LogLineStyle.Classify("WARN: CHECK THIS"));
     }
 
+    [Fact]
+    public void InlineSeverityColor_AppliesOnlyInsideBenchmarkMarkers()
+    {
+        const string line = "Baseline  Completed  WARNING: 2.7 GiB free";
+        var warningStart = line.IndexOf("WARNING", StringComparison.Ordinal);
+
+        Assert.Equal(LltopTheme.Warning, LogLineStyle.InlineSeverityColor(line, warningStart));
+        Assert.Equal(LltopTheme.Warning, LogLineStyle.InlineSeverityColor(line, warningStart + 6));
+        Assert.Null(LogLineStyle.InlineSeverityColor(line, warningStart - 1));
+        Assert.Equal(LltopTheme.Error, LogLineStyle.InlineSeverityColor("CRITICAL: 1.5 GiB free", 0));
+    }
+
     [Theory]
     [InlineData("0.00.189.231 W common_fit_params: loading warning", "Warning")]
     [InlineData("0.00.307.681 E srv load_model: rejected architecture", "Error")]

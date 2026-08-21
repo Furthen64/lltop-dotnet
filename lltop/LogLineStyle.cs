@@ -9,7 +9,10 @@ internal enum LogLineKind
     Warning,
     Performance,
     Offload,
-    Progress
+    Progress,
+    MemoryFullyOnGpu,
+    MemoryTight,
+    MemoryPartialOffload
 }
 
 internal static class LogLineStyle
@@ -19,6 +22,11 @@ internal static class LogLineStyle
     internal static LogLineKind Classify(string line)
     {
         var lower = line.ToLowerInvariant();
+
+        if (lower.Contains("partial offload")) return LogLineKind.MemoryPartialOffload;
+        if (lower.Contains("fully on gpu") && (lower.Contains("tight") || lower.Contains("close-to-oom"))) return LogLineKind.MemoryTight;
+        if (lower.Contains("fully on gpu")) return LogLineKind.MemoryFullyOnGpu;
+        if (lower.Contains("critical:")) return LogLineKind.Error;
 
         // Keep this ahead of the generic "failed" match, as in the Go parser.
         if (lower.Contains("failed to fit params to free device memory") &&
@@ -49,6 +57,22 @@ internal static class LogLineStyle
         LogLineKind.Performance => LltopTheme.Success,
         LogLineKind.Offload => LltopTheme.Highlight,
         LogLineKind.Progress => LltopTheme.Muted,
+        LogLineKind.MemoryFullyOnGpu => LltopTheme.MemoryFullyOnGpu,
+        LogLineKind.MemoryTight => LltopTheme.MemoryTight,
+        LogLineKind.MemoryPartialOffload => LltopTheme.MemoryPartialOffload,
         _ => null
     };
+
+    internal static Color? InlineSeverityColor(string line, int column)
+    {
+        if (ContainsAt(line, "CRITICAL", column)) return LltopTheme.Error;
+        if (ContainsAt(line, "WARNING", column)) return LltopTheme.Warning;
+        return null;
+    }
+
+    static bool ContainsAt(string line, string marker, int column)
+    {
+        var start = line.IndexOf(marker, StringComparison.Ordinal);
+        return start >= 0 && column >= start && column < start + marker.Length;
+    }
 }

@@ -57,6 +57,14 @@ continue, as chosen in setup. Benchmark executions are not added to normal run
 history. JSON and self-contained HTML reports are saved in `benchmarks_dir`
 (`~/.config/lltop/benchmarks` by default).
 
+## Theme
+
+lltop currently ships with the `midnight` theme, which is also the default.
+Set `theme = "midnight"` in `~/.config/lltop/config.toml`. Themes use semantic
+tokens for selection, hotkeys, warnings, errors, and memory-fit states, so
+future palettes can change the appearance without changing the meaning of
+`FULLY ON GPU`, `TIGHT`, or `PARTIAL OFFLOAD REQUIRED`.
+
 Model discovery reads an optional `.llmignore` from the configured models directory.
 Blank lines and `#` comments are ignored; `*`, `?`, `**`, directory patterns, and
 later `!` negation rules are supported. For example:

@@ -6,6 +6,7 @@ sealed class AppConfig
     public string RunsDir { get; set; } = Path.Combine(Root, "runs");
     public string BenchmarksDir { get; set; } = Path.Combine(Root, "benchmarks");
     public string LogsDir { get; set; } = Path.Combine(Root, "logs");
+    public string Theme { get; set; } = "midnight";
     public string DefaultProfile { get; set; } = "";
     public string Editor { get; set; } = Environment.GetEnvironmentVariable("EDITOR") ?? (OperatingSystem.IsWindows() ? "notepad" : "nano");
     public bool ConfirmRestart { get; set; } = true;
@@ -52,7 +53,7 @@ sealed class AppConfig
     public void Save()
     {
         Directory.CreateDirectory(Root);
-        var contents = $"llama_server = {Toml.Quote(LlamaServer)}\nmodels_dir = {Toml.Quote(ModelsDir)}\ndefault_profile = {Toml.Quote(DefaultProfile)}\nprofiles_dir = {Toml.Quote(ProfilesDir)}\nruns_dir = {Toml.Quote(RunsDir)}\nbenchmarks_dir = {Toml.Quote(BenchmarksDir)}\nlogs_dir = {Toml.Quote(LogsDir)}\neditor = {Toml.Quote(Editor)}\nconfirm_restart = {ConfirmRestart.ToString().ToLowerInvariant()}\nconfirm_recent_failure = {ConfirmRecentFailure.ToString().ToLowerInvariant()}\nrecent_failure_window_seconds = {RecentFailureWindowSeconds}\nstartup_failure_seconds = {StartupFailureSeconds}\ndefault_host = {Toml.Quote(DefaultHost)}\ndefault_port = {DefaultPort}\n";
+        var contents = $"llama_server = {Toml.Quote(LlamaServer)}\nmodels_dir = {Toml.Quote(ModelsDir)}\ndefault_profile = {Toml.Quote(DefaultProfile)}\nprofiles_dir = {Toml.Quote(ProfilesDir)}\nruns_dir = {Toml.Quote(RunsDir)}\nbenchmarks_dir = {Toml.Quote(BenchmarksDir)}\nlogs_dir = {Toml.Quote(LogsDir)}\ntheme = {Toml.Quote(Theme)}\neditor = {Toml.Quote(Editor)}\nconfirm_restart = {ConfirmRestart.ToString().ToLowerInvariant()}\nconfirm_recent_failure = {ConfirmRecentFailure.ToString().ToLowerInvariant()}\nrecent_failure_window_seconds = {RecentFailureWindowSeconds}\nstartup_failure_seconds = {StartupFailureSeconds}\ndefault_host = {Toml.Quote(DefaultHost)}\ndefault_port = {DefaultPort}\n";
         var temp = ConfigPath + ".tmp";
         File.WriteAllText(temp, contents);
         File.Move(temp, ConfigPath, true);

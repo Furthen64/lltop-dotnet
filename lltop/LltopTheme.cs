@@ -3,21 +3,76 @@ using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 using TuiAttribute = Terminal.Gui.Drawing.Attribute;
 
+internal sealed record LltopThemeDefinition(
+    string Name,
+    Color PanelBorder,
+    Color Title,
+    Color Hotkey,
+    Color Success,
+    Color Warning,
+    Color Error,
+    Color Highlight,
+    Color SelectedText,
+    Color SelectedBackground,
+    Color AnalysisBackground,
+    Color AnalysisText,
+    Color MemoryFullyOnGpu,
+    Color MemoryTight,
+    Color MemoryPartialOffload);
+
 internal static class LltopTheme
 {
-    // RGB equivalents of the ANSI-256 colors used by go_source/internal/ui/styles.go.
-    internal static readonly Color PanelBorder = new(95, 95, 255);
-    internal static readonly Color Title = new(95, 255, 255);
-    internal static readonly Color Muted = new(95, 255, 0);
-    internal static readonly Color Success = new(0, 215, 135);
-    internal static readonly Color Warning = new(255, 175, 0);
-    internal static readonly Color Error = new(255, 0, 0);
-    internal static readonly Color Info = new(95, 215, 255);
-    internal static readonly Color Highlight = new(95, 175, 255);
-    internal static readonly Color SelectedText = new(255, 255, 175);
-    internal static readonly Color SelectedBackground = new(95, 95, 255);
-    internal static readonly Color AnalysisBackground = new(20, 31, 55);
-    internal static readonly Color AnalysisText = new(225, 235, 255);
+    // Add future themes here. Screens consume semantic tokens below, never a theme's
+    // raw RGB values, so a new palette does not change the meaning of UI states.
+    static readonly IReadOnlyDictionary<string, LltopThemeDefinition> Themes =
+        new Dictionary<string, LltopThemeDefinition>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["midnight"] = new(
+                "Midnight",
+                PanelBorder: new(95, 95, 255),
+                Title: new(95, 255, 255),
+                Hotkey: new(95, 255, 0),
+                Success: new(0, 215, 135),
+                Warning: new(255, 175, 0),
+                Error: new(255, 0, 0),
+                Highlight: new(95, 175, 255),
+                SelectedText: new(255, 255, 175),
+                SelectedBackground: new(95, 95, 255),
+                AnalysisBackground: new(20, 31, 55),
+                AnalysisText: new(225, 235, 255),
+                MemoryFullyOnGpu: new(95, 255, 255),
+                MemoryTight: new(255, 175, 0),
+                MemoryPartialOffload: new(255, 95, 175))
+        };
+
+    static LltopThemeDefinition current = Themes["midnight"];
+
+    internal static IReadOnlyList<string> Names => Themes.Values.Select(x => x.Name).OrderBy(x => x, StringComparer.Ordinal).ToList();
+    internal static string CurrentName => current.Name;
+
+    internal static bool Select(string? name)
+    {
+        if (!string.IsNullOrWhiteSpace(name) && Themes.TryGetValue(name.Trim(), out var selected))
+        {
+            current = selected;
+            return true;
+        }
+        current = Themes["midnight"];
+        return false;
+    }
+
+    internal static Color PanelBorder => current.PanelBorder;
+    internal static Color Title => current.Title;
+    internal static Color Muted => current.Hotkey;
+    internal static Color Success => current.Success;
+    internal static Color Warning => current.Warning;
+    internal static Color Error => current.Error;
+    internal static Color Highlight => current.Highlight;
+    internal static Color SelectedText => current.SelectedText;
+    internal static Color SelectedBackground => current.SelectedBackground;
+    internal static Color MemoryFullyOnGpu => current.MemoryFullyOnGpu;
+    internal static Color MemoryTight => current.MemoryTight;
+    internal static Color MemoryPartialOffload => current.MemoryPartialOffload;
 
     internal static void Apply(
         IEnumerable<FrameView> frames,
@@ -41,8 +96,6 @@ internal static class LltopTheme
             ? new TuiAttribute(SelectedText, SelectedBackground, TextStyle.Bold)
             : normal);
 
-        // TextView normally paints read-only focused content with its Focus role,
-        // which is the contrasting olive background seen in the old log panel.
         Override(logView, _ => normal);
         logView.PanelAttribute = normal;
         Override(status, _ => normal);
@@ -51,8 +104,9 @@ internal static class LltopTheme
 #pragma warning disable CS0618 // Terminal.Gui 2.4 ships TextView as its built-in read-only text control.
     internal static void ApplyAnalysis(TextView report)
     {
-        var analysis = new TuiAttribute(AnalysisText, AnalysisBackground);
+        var analysis = new TuiAttribute(current.AnalysisText, current.AnalysisBackground);
         Override(report, _ => analysis);
+        if (report is LogTextView log) log.PanelAttribute = analysis;
     }
 #pragma warning restore CS0618
 
