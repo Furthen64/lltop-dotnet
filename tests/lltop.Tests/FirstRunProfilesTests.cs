@@ -37,7 +37,7 @@ public sealed class FirstRunProfilesTests : IDisposable
     }
 
     [Theory]
-    [InlineData("Qwen3-Coder-30B.gguf", "qwen", "chatml", 65536)]
+    [InlineData("Qwen3-Coder-30B.gguf", "qwen", "", 65536)]
     [InlineData("gpt-oss-20b-Q4.gguf", "gpt-oss", "", 131072)]
     [InlineData("GPTOSS-120B.gguf", "gpt-oss", "", 131072)]
     [InlineData("DeepSeek-R1-Distill-Qwen.gguf", "deepseek", "deepseek", 65536)]
@@ -63,6 +63,15 @@ public sealed class FirstRunProfilesTests : IDisposable
         Assert.Empty(profile.CacheK);
         Assert.False(profile.Jinja);
         Assert.False(profile.NoMmap);
+    }
+
+    [Fact]
+    public void CreateForModel_AppliesQwen38VisionRecommendation()
+    {
+        var profile = FirstRunProfiles.CreateForModel(Config(), "qwen38", Path.Combine(root, "Qwen3.8-27B-IQ3.gguf"));
+
+        Assert.Empty(profile.ChatTemplate);
+        Assert.Equal(1024, profile.ImageMinTokens);
     }
 
     [Fact]
@@ -102,7 +111,7 @@ public sealed class FirstRunProfilesTests : IDisposable
         Assert.Equal(2, refresh.ModelsFound);
         Assert.Equal(1, refresh.ProfilesCreated);
         Assert.Equal(2, loaded.Profiles.Count);
-        Assert.Contains(loaded.Profiles, profile => profile.Name == "qwen3" && profile.ChatTemplate == "chatml");
+        Assert.Contains(loaded.Profiles, profile => profile.Name == "qwen3" && profile.ChatTemplate == "");
         Assert.Contains(loaded.Profiles, profile => profile.Name == "deepseek-v3" && profile.ChatTemplate == "deepseek3");
     }
 

@@ -9,6 +9,7 @@ sealed class Profile
     public string Model { get; set; } = "";
     public bool Vision { get; set; }
     public string Mmproj { get; set; } = "";
+    public int ImageMinTokens { get; set; }
     public string Host { get; set; } = "0.0.0.0";
     public int Port { get; set; } = 8080;
     public string Alias { get; set; } = "";
@@ -32,7 +33,7 @@ sealed class Profile
     public bool Jinja { get; set; } = true;
     public bool Metrics { get; set; } = true;
     public bool NoMmap { get; set; } = true;
-    public string ChatTemplate { get; set; } = "chatml";
+    public string ChatTemplate { get; set; } = "";
     public string Reasoning { get; set; } = "auto";
     public int ReasoningBudget { get; set; } = -1;
     public List<string> ExtraArgs { get; set; } = [];
@@ -49,7 +50,7 @@ sealed class Profile
     public Profile Copy(string name) => new()
     {
         Name = name, Description = Description, LlamaServer = LlamaServer, Model = Model,
-        Vision = Vision, Mmproj = Mmproj,
+        Vision = Vision, Mmproj = Mmproj, ImageMinTokens = ImageMinTokens,
         Host = Host, Port = Port, Alias = Alias, Ctx = Ctx, Ngl = Ngl,
         CacheK = CacheK, CacheV = CacheV, Temp = Temp, TopP = TopP, TopK = TopK,
         MinP = MinP, RepeatPenalty = RepeatPenalty, RepeatLastN = RepeatLastN,
@@ -71,14 +72,15 @@ sealed class Profile
         if (ReasoningBudget < -1) throw new InvalidOperationException("Reasoning budget must be -1 or greater.");
         if (RepeatPenalty < 0) throw new InvalidOperationException("Repeat penalty cannot be negative.");
         if (RepeatLastN < -1) throw new InvalidOperationException("Repeat last N must be -1 or greater.");
+        if (ImageMinTokens < 0) throw new InvalidOperationException("Image minimum tokens cannot be negative.");
         if (Vision)
         {
             if (string.IsNullOrWhiteSpace(Mmproj))
                 throw new InvalidOperationException("Vision requires an mmproj path.");
             if (!VisionProjectorResolver.SupportsModel(Model))
-                throw new InvalidOperationException("Vision currently supports only Qwen3.6-35B-A3B model GGUFs.");
+                throw new InvalidOperationException("Vision currently supports Qwen3.6-35B-A3B and Qwen3.8-27B model GGUFs.");
             if (!VisionProjectorResolver.IsExpectedProjector(Mmproj))
-                throw new InvalidOperationException("Qwen3.6 vision requires mmproj-BF16.gguf from the same model family.");
+                throw new InvalidOperationException("Vision requires mmproj-BF16.gguf from the same model family.");
         }
         if (!forLaunch) return;
         var server = string.IsNullOrWhiteSpace(LlamaServer) ? cfg?.LlamaServer : LlamaServer;
@@ -171,7 +173,7 @@ sealed class ProfileStore(string directory)
         void B(string key, bool value) => b.Append(key).Append(" = ").AppendLine(value ? "true" : "false");
         S("name", p.Name); S("description", p.Description);
         if (!string.IsNullOrWhiteSpace(p.LlamaServer)) S("llama_server", p.LlamaServer);
-        S("model", p.Model); B("vision", p.Vision); S("mmproj", p.Mmproj);
+        S("model", p.Model); B("vision", p.Vision); S("mmproj", p.Mmproj); I("image_min_tokens", p.ImageMinTokens);
         S("host", p.Host); I("port", p.Port); S("alias", p.Alias);
         I("ctx", p.Ctx); I("ngl", p.Ngl); S("cache_k", p.CacheK); S("cache_v", p.CacheV);
         D("temp", p.Temp); D("top_p", p.TopP); I("top_k", p.TopK); D("min_p", p.MinP);

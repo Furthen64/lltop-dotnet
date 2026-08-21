@@ -189,6 +189,7 @@ sealed class ServerRunner : IDisposable
 
         segments.Add(new(["-m", p.Model], LaunchArgumentOrigin.Generated, "model"));
         if (p.Vision) Pair("--mmproj", p.Mmproj, "vision projector");
+        if (p.ImageMinTokens > 0) segments.Add(new(["--image-min-tokens", p.ImageMinTokens.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "image minimum tokens"));
         segments.Add(new(["--port", p.Port.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "port"));
         Pair("--host", p.Host, "host");
         Pair("-a", p.Alias, "alias");

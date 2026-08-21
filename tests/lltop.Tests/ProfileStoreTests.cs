@@ -14,7 +14,7 @@ public sealed class ProfileStoreTests : IDisposable
             TopP = .83, MinP = .02, UBatch = 128, FlashAttn = "on", NoMmap = false,
             Vision = true, Mmproj = "/models/mmproj-BF16.gguf",
             RepeatPenalty = 1.15, RepeatLastN = 128, PresencePenalty = .2, FrequencyPenalty = .3,
-            ReasoningBudget = 2048, ExtraArgs = ["--verbose", "--log-colors", "value with spaces"]
+            ReasoningBudget = 2048, ImageMinTokens = 1024, ExtraArgs = ["--verbose", "--log-colors", "value with spaces"]
         };
 
         store.Save(original);
@@ -36,6 +36,7 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.True(loaded.Vision);
         Assert.Equal(original.Mmproj, loaded.Mmproj);
         Assert.Equal(2048, loaded.ReasoningBudget);
+        Assert.Equal(1024, loaded.ImageMinTokens);
         Assert.Equal(original.ExtraArgs, loaded.ExtraArgs);
     }
 
@@ -78,6 +79,24 @@ public sealed class ProfileStoreTests : IDisposable
 
         Assert.Throws<IOException>(() => store.Save(new Profile { Name = "same-name", Model = "/tmp/two.gguf" }));
         Assert.Single(store.LoadAll().Profiles);
+    }
+
+    [Fact]
+    public void DuplicateCopy_HasAUniqueNameAndIndependentExtraArguments()
+    {
+        var store = new ProfileStore(directory);
+        var original = new Profile { Name = "coding", Model = "/tmp/model.gguf", ExtraArgs = ["--verbose"] };
+        store.Save(original);
+
+        var copy = original.Copy(store.UniqueName(original.Name + "-copy"));
+        copy.SourcePath = "";
+        copy.ExtraArgs.Add("--metrics");
+        store.Save(copy);
+
+        var profiles = store.LoadAll().Profiles;
+        Assert.Equal("coding-copy", copy.Name);
+        Assert.Equal(["--verbose"], profiles.Single(p => p.Name == "coding").ExtraArgs);
+        Assert.Equal(["--verbose", "--metrics"], profiles.Single(p => p.Name == "coding-copy").ExtraArgs);
     }
 
     public void Dispose() { if (Directory.Exists(directory)) Directory.Delete(directory, true); }

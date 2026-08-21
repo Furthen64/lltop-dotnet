@@ -17,7 +17,7 @@ A .NET 10 + Terminal.Gui v2 control center for llama.cpp's `llama-server`.
 - Copy launch commands, toggle log autoscroll, and inspect history from the keyboard.
 - Configure the llama.cpp binary and model directory with a first-run wizard.
 - Scan `.gguf` and `.bin` models after setup and generate profiles with Qwen, GPT-OSS, DeepSeek, or safe generic defaults.
-- Enable Qwen3.6-35B-A3B vision profiles with a matching `mmproj-BF16.gguf` projector.
+- Enable Qwen3.6-35B-A3B and Qwen3.8-27B vision profiles with a matching `mmproj-BF16.gguf` projector.
 - Discover sibling `mmproj*.gguf` files and use their GGUF metadata to suggest the matching vision projector.
 - Exclude local models from discovery with glob patterns in `<models_dir>/.llmignore`.
 
@@ -32,8 +32,9 @@ Run with:
 `checkreqs.sh` verifies that Ubuntu has the .NET 10 SDK needed to build the app
 and prints installation instructions when it is missing.
 
-The main keys are shown in the application footer. Press `N` for run history and
-notes, `c` to copy the launch command, and `l` to toggle log autoscroll. Profiles
+The main keys are shown in the application footer. Press `d` to duplicate the
+selected profile, `H` for run history and notes, `c` to copy the launch command,
+and `l` to toggle log autoscroll. Profiles
 are stored under `~/.config/lltop/profiles` and run records under
 `~/.config/lltop/runs` by default.
 

@@ -88,6 +88,9 @@ internal static class RunHistory
 
     public static List<RunRecordRef> ForProfile(string directory, string profile) => Load(directory).Where(x => x.Record.ProfileName.Equals(profile, StringComparison.OrdinalIgnoreCase)).ToList();
 
+    public static bool HasRunForProfile(string directory, string profile) =>
+        Load(directory).Any(x => x.Record.ProfileName.Equals(profile, StringComparison.OrdinalIgnoreCase));
+
     public static ProfileRunSummary Summarize(string directory, string profile)
     {
         var records = ForProfile(directory, profile).Select(x => x.Record).OrderBy(x => x.StartedAt).ToList();

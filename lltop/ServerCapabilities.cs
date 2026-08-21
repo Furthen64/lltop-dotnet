@@ -27,6 +27,10 @@ sealed record LaunchPlan(
 
 sealed class ServerCapabilityRecord
 {
+    public const int CurrentProbeSchemaVersion = 2;
+
+    // A missing value is an older cache entry and must be reprobed.
+    public int ProbeSchemaVersion { get; init; }
     public string BinaryPath { get; init; } = "";
     public long BinaryLastWriteTimeUtcTicks { get; init; }
     public long BinaryLength { get; init; }
@@ -147,6 +151,7 @@ sealed class ServerCapabilityCache
 
         var info = new FileInfo(path);
         if (cache.TryGetValue(path, out var existing) &&
+            existing.ProbeSchemaVersion == ServerCapabilityRecord.CurrentProbeSchemaVersion &&
             existing.BinaryLastWriteTimeUtcTicks == info.LastWriteTimeUtc.Ticks &&
             existing.BinaryLength == info.Length)
             return existing;
@@ -229,6 +234,7 @@ static class ServerCapabilityParser
 
         return new ServerCapabilityRecord
         {
+            ProbeSchemaVersion = ServerCapabilityRecord.CurrentProbeSchemaVersion,
             BinaryPath = executable,
             BinaryExists = true,
             BinaryLastWriteTimeUtcTicks = info.LastWriteTimeUtc.Ticks,
@@ -299,10 +305,19 @@ static class ServerCapabilityParser
 
     static string ParseBackend(string text)
     {
-        foreach (var backend in new[] { "CUDA", "Metal", "Vulkan", "HIP", "OpenCL", "SYCL", "CPU" })
-            if (text.Contains(backend, StringComparison.OrdinalIgnoreCase)) return backend.ToUpperInvariant();
         var explicitMatch = Regex.Match(text, @"backend\s*[:=]\s*([A-Za-z0-9_+-]+)", RegexOptions.IgnoreCase);
-        return explicitMatch.Success ? explicitMatch.Groups[1].Value : "";
+        if (explicitMatch.Success) return explicitMatch.Groups[1].Value.ToUpperInvariant();
+
+        // --help always mentions CPU options, so only use unambiguous runtime markers
+        // rather than treating any occurrence of a backend name as build information.
+        if (Regex.IsMatch(text, @"\b(?:ggml|llama)[_-]cuda", RegexOptions.IgnoreCase)) return "CUDA";
+        if (Regex.IsMatch(text, @"\b(?:ggml|llama)[_-]vulkan", RegexOptions.IgnoreCase)) return "VULKAN";
+        if (Regex.IsMatch(text, @"\b(?:ggml|llama)[_-](?:hip|rocm)", RegexOptions.IgnoreCase)) return "HIP";
+        if (Regex.IsMatch(text, @"\b(?:ggml|llama)[_-]metal", RegexOptions.IgnoreCase)) return "METAL";
+        if (Regex.IsMatch(text, @"\b(?:ggml|llama)[_-]opencl", RegexOptions.IgnoreCase)) return "OPENCL";
+        if (Regex.IsMatch(text, @"\b(?:ggml|llama)[_-]sycl", RegexOptions.IgnoreCase)) return "SYCL";
+        if (Regex.IsMatch(text, @"\b(?:cpu-only|backend\s+cpu)\b", RegexOptions.IgnoreCase)) return "CPU";
+        return "";
     }
 
     static string ParseGpuName(string text)

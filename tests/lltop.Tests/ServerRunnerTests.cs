@@ -33,6 +33,7 @@ public sealed class ServerRunnerTests
             Model = "/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
             Vision = true,
             Mmproj = "/models/mmproj-BF16.gguf",
+            ImageMinTokens = 1024,
             ExtraArgs = ["--mmproj", "/wrong/projector.gguf"]
         };
 
@@ -40,6 +41,7 @@ public sealed class ServerRunnerTests
 
         Assert.Equal(1, args.Count(x => x == "--mmproj"));
         Assert.Equal(profile.Mmproj, args[args.IndexOf("--mmproj") + 1]);
+        Assert.Equal("1024", args[args.IndexOf("--image-min-tokens") + 1]);
         Assert.DoesNotContain("/wrong/projector.gguf", args);
     }
 

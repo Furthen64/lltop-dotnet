@@ -46,9 +46,31 @@ public sealed class VisionProjectorResolverTests : IDisposable
         Assert.Contains("only readable sibling", result.Message);
     }
 
+    [Fact]
+    public void FindBeside_MatchesQwen38ProjectorMetadata()
+    {
+        Directory.CreateDirectory(directory);
+        var model = WriteGguf("Qwen3.8-27B-UD-IQ3_XXS.gguf", new()
+        {
+            ["general.name"] = "Qwen3.8-27B",
+            ["general.architecture"] = "qwen35"
+        });
+        var projector = WriteGguf("mmproj-BF16.gguf", new()
+        {
+            ["general.type"] = "mmproj",
+            ["general.name"] = "Qwen3.8-27B",
+            ["general.architecture"] = "clip"
+        });
+
+        var result = VisionProjectorResolver.FindBeside(model);
+
+        Assert.Equal(projector, result.Path);
+        Assert.True(result.MetadataMatched);
+    }
+
     [Theory]
     [InlineData("Qwen3.6-35B-A3B-Q4.gguf", true)]
-    [InlineData("Qwen3.8-27B-Q6K.gguf", false)]
+    [InlineData("Qwen3.8-27B-Q6K.gguf", true)]
     [InlineData("DeepSeek-V3.gguf", false)]
     public void SupportsModel_RecognizesTheVisionFamily(string modelName, bool expected)
     {

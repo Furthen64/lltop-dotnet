@@ -27,6 +27,28 @@ public sealed class LlamaLogParserTests
     }
 
     [Fact]
+    public void ParsesActiveCudaDeviceFromLiveLog()
+    {
+        var parsed = LlamaLogParser.Parse("0.00.152.688 I - CUDA0 : NVIDIA GeForce RTX 4070 Ti SUPER (15941 MiB, 15132 MiB free)");
+        var stats = new ServerStats();
+        stats.Consume("0.00.152.688 I - CUDA0 : NVIDIA GeForce RTX 4070 Ti SUPER (15941 MiB, 15132 MiB free)");
+
+        Assert.Equal("CUDA", parsed.RuntimeBackend);
+        Assert.Equal("NVIDIA GeForce RTX 4070 Ti SUPER", parsed.RuntimeGpuName);
+        Assert.Equal("CUDA", stats.RuntimeBackend);
+        Assert.Equal(parsed.RuntimeGpuName, stats.RuntimeGpuName);
+    }
+
+    [Fact]
+    public void IgnoresCudaArchitectureDetailsThatAreNotADevice()
+    {
+        var parsed = LlamaLogParser.Parse("I system_info: CUDA : ARCHS = 890 | USE_GRAPHS = 1");
+
+        Assert.Equal("", parsed.RuntimeBackend);
+        Assert.Equal("", parsed.RuntimeGpuName);
+    }
+
+    [Fact]
     public void ParsesLiveGenerationThroughput()
     {
         const string line = "3.43.918.536 I slot print_timing: id 0 | task 1587 | n_decoded = 399, tg = 19.80 t/s, tg_3s = 19.61 t/s";

@@ -26,6 +26,8 @@ internal sealed class ParsedLogLine
     public int GpuModelMiB { get; init; }
     public int GpuContextMiB { get; init; }
     public int GpuComputeMiB { get; init; }
+    public string RuntimeBackend { get; init; } = "";
+    public string RuntimeGpuName { get; init; } = "";
     public bool Cancelled { get; init; }
     public string ErrorKind { get; init; } = "";
     public string ErrorMessage { get; init; } = "";
@@ -47,6 +49,7 @@ internal static partial class LlamaLogParser
         var chat = ChatFormat().Match(line);
         var context = Context().Match(line);
         var memory = Memory().Match(line);
+        var runtimeDevice = RuntimeDevice().Match(line);
         var lower = line.ToLowerInvariant();
         var hint = lower.Contains("failed to fit params to free device memory") && lower.Contains("n_gpu_layers already set by user");
         var errorKind = hint ? "" : lower switch
@@ -68,6 +71,8 @@ internal static partial class LlamaLogParser
             TotalMs = D(total, 1), TotalTokens = I(total, 2), OffloadedLayers = I(offload, 1), TotalLayers = I(offload, 2),
             Progress = D(progress, 3), ChatFormat = chat.Success ? chat.Groups[1].Value.Trim() : "", ContextSlotSize = I(context, 1),
             GpuTotalMiB = I(memory, 2), GpuFreeMiB = I(memory, 3), GpuModelMiB = I(memory, 4), GpuContextMiB = I(memory, 5), GpuComputeMiB = I(memory, 6),
+            RuntimeBackend = runtimeDevice.Success ? runtimeDevice.Groups[1].Value.ToUpperInvariant() : "",
+            RuntimeGpuName = runtimeDevice.Success ? runtimeDevice.Groups[2].Value.Trim() : "",
             Cancelled = line.Contains("stop: cancel task", StringComparison.Ordinal), ErrorKind = errorKind,
             ErrorMessage = errorKind.Length > 0 ? line.Trim() : "",
             HintKind = hint ? "gpu_layers_autofit_skipped" : "",
@@ -96,6 +101,8 @@ internal static partial class LlamaLogParser
     private static partial Regex Context();
     [GeneratedRegex(@"llama_memory_breakdown_print.*?\((.+?)\).*?\|\s+(\d+)\s*=\s*(\d+)\s+\+.*?\(\s*(\d+)\s+\+\s+(\d+)\s+\+\s+(\d+)\)")]
     private static partial Regex Memory();
+    [GeneratedRegex(@"\s-\s*(CUDA|HIP|VULKAN|METAL|OPENCL|SYCL)\d*\s*:\s*([^\r\n(]+?)(?:\s*\(|$)", RegexOptions.IgnoreCase)]
+    private static partial Regex RuntimeDevice();
 }
 
 internal sealed class ServerStats
@@ -115,6 +122,8 @@ internal sealed class ServerStats
     public int GpuModelMiB { get; private set; }
     public int GpuContextMiB { get; private set; }
     public int GpuComputeMiB { get; private set; }
+    public string RuntimeBackend { get; private set; } = "";
+    public string RuntimeGpuName { get; private set; } = "";
     public string LastError { get; private set; } = "";
     public string LastHint { get; private set; } = "";
     public List<RunIssue> Issues { get; } = [];
@@ -135,6 +144,7 @@ internal sealed class ServerStats
         if (p.ChatFormat.Length > 0) ChatFormat = p.ChatFormat;
         if (p.ContextSlotSize > 0) ContextSlotSize = p.ContextSlotSize;
         if (p.GpuTotalMiB > 0) { GpuTotalMiB = p.GpuTotalMiB; GpuFreeMiB = p.GpuFreeMiB; GpuModelMiB = p.GpuModelMiB; GpuContextMiB = p.GpuContextMiB; GpuComputeMiB = p.GpuComputeMiB; }
+        if (p.RuntimeBackend.Length > 0) { RuntimeBackend = p.RuntimeBackend; RuntimeGpuName = p.RuntimeGpuName; }
         if (p.HintMessage.Length > 0) LastHint = p.HintMessage;
         if (p.IsError)
         {

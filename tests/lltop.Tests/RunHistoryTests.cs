@@ -41,5 +41,16 @@ public sealed class RunHistoryTests : IDisposable
         Assert.False(RunHistory.HasRunForScenario(dir, profile));
     }
 
+    [Fact]
+    public void DuplicateProfile_IsTreatedAsFirstLaunchEvenWhenItsScenarioWasRun()
+    {
+        var original = new Profile { Name = "qwen", Model = "/m.gguf" };
+        RunHistory.Save(dir, RunRecord.Create(original, "server", DateTimeOffset.Now.AddSeconds(-2), DateTimeOffset.Now, 0, "exit", new ServerStats()));
+        var duplicate = original.Copy("qwen-copy");
+
+        Assert.True(RunHistory.HasRunForScenario(dir, duplicate));
+        Assert.False(RunHistory.HasRunForProfile(dir, duplicate.Name));
+    }
+
     public void Dispose() { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
 }

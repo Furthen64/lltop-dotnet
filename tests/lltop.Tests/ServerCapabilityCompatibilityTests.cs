@@ -95,6 +95,17 @@ public sealed class ServerCapabilityCompatibilityTests : IDisposable
     }
 
     [Fact]
+    public void CudaInitializationMessage_IsRecognizedDespiteCpuHelpText()
+    {
+        var version = "E ggml_cuda_init: failed to initialize CUDA: no CUDA-capable device is detected\nversion: 9368 (c6e408837)";
+        var help = "--threads N  number of CPU threads to use";
+
+        var capability = Capability(version, help);
+
+        Assert.Equal("CUDA", capability.Backend);
+    }
+
+    [Fact]
     public void UnsupportedFlagWithSeparateValue_RemovesOptionAndValue()
     {
         var profile = BaseProfile();
@@ -202,6 +213,31 @@ public sealed class ServerCapabilityCompatibilityTests : IDisposable
         Assert.Equal(6, executor.Calls.Count);
         Assert.Equal(4, executor.Calls.Count(x => x == $"{first} --version" || x == $"{first} --help"));
         Assert.Equal(2, executor.Calls.Count(x => x == $"{second} --version" || x == $"{second} --help"));
+    }
+
+    [Fact]
+    public void CacheInvalidatesWhenBackendDetectionChanges()
+    {
+        var cachePath = Path.Combine(root, "cache.json");
+        var binary = Touch("cuda-server");
+        var info = new FileInfo(binary);
+        File.WriteAllText(cachePath, $$"""
+            [{
+              "BinaryPath": "{{binary.Replace("\\", "\\\\")}}",
+              "BinaryLastWriteTimeUtcTicks": {{info.LastWriteTimeUtc.Ticks}},
+              "BinaryLength": {{info.Length}},
+              "BinaryExists": true,
+              "Backend": "CPU"
+            }]
+            """);
+        var executor = new FakeProbeExecutor();
+        executor.Add(binary, "--version", ProbeCommandResult.Success("ggml_cuda_init: unavailable"));
+        executor.Add(binary, "--help", ProbeCommandResult.Success("--threads N CPU threads"));
+
+        var capability = new ServerCapabilityCache(cachePath, executor).Get(binary);
+
+        Assert.Equal("CUDA", capability.Backend);
+        Assert.Equal(2, executor.Calls.Count);
     }
 
     [Fact]

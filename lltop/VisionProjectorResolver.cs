@@ -14,8 +14,10 @@ static class VisionProjectorResolver
     public static bool SupportsModel(string modelPath)
     {
         var name = Path.GetFileName(modelPath).Replace('_', '-');
-        return name.Contains("qwen3.6", StringComparison.OrdinalIgnoreCase) &&
-               name.Contains("35b-a3b", StringComparison.OrdinalIgnoreCase);
+        return (name.Contains("qwen3.6", StringComparison.OrdinalIgnoreCase) &&
+                name.Contains("35b-a3b", StringComparison.OrdinalIgnoreCase)) ||
+               (name.Contains("qwen3.8", StringComparison.OrdinalIgnoreCase) &&
+                name.Contains("27b", StringComparison.OrdinalIgnoreCase));
     }
 
     public static bool IsExpectedProjector(string projectorPath) =>

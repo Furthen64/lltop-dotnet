@@ -49,7 +49,7 @@ var statusFrame = new FrameView { Title = " Selected profile / server ", X = 0, 
 var status = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(), Text = "Loading…" };
 statusFrame.Add(status);
 var help = new Label { X = 1, Y = Pos.Bottom(statusFrame), Width = Dim.Fill(2), Height = 3,
-    Text = "[Enter] Start   [e] Edit   [p] Preview   [n] New   [Ctrl+R/F5] Find models\n[↑/↓] Select   [s] Stop   [H] History   [h/?] All keys   [q] Quit" };
+    Text = "[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [p] Preview\n[↑/↓] Select   [s] Stop   [H] History   [h/?] All keys   [q] Quit" };
 var resourceStrip = new ResourceStripView { X = 1, Y = Pos.Bottom(help), Width = Dim.Fill(2) };
 win.Add(banner, profileFrame, logFrame, statusFrame, help, resourceStrip);
 LltopTheme.Apply([profileFrame, logFrame, statusFrame], banner, profileList, logView, status, help, logStatus);
@@ -66,7 +66,7 @@ void ApplyLayout()
     help.Height = helpHeight;
     help.Text = expandedHelp
         ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+R/F5] Find models\nLOG & RUNS  [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nSTATUS      [●] Running   [○] Stopped   [💥] Broken/last launch failed   [V] Vision\nHELP        [h/?] Show fewer keys"
-        : "[Enter] Start   [e] Edit   [p] Preview   [n] New   [Ctrl+R/F5] Find models\n[↑/↓] Select   [s] Stop   [H] History   [h/?] All keys   [q] Quit";
+        : "[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [p] Preview\n[↑/↓] Select   [s] Stop   [H] History   [h/?] All keys   [q] Quit";
     var reserved = 10 + helpHeight + 1;
     if (win.Viewport.Width is > 0 and < 84)
     {
@@ -143,15 +143,20 @@ void UpdateStatus(string message = "")
     var modelSize = ModelSize(p.Model);
     var gpu = GpuLaunchInfo.ForProfile(p);
     var capability = CapabilitiesFor(p);
-    resourceGpuBackend = capability.Backend;
-    resourceGpuName = capability.GpuName;
+    var runtimeBackend = runner.IsActive ? serverStats.RuntimeBackend : "";
+    var runtimeGpuName = runner.IsActive ? serverStats.RuntimeGpuName : "";
+    var backend = string.IsNullOrWhiteSpace(runtimeBackend)
+        ? (string.IsNullOrWhiteSpace(capability.Backend) ? "unknown" : capability.Backend)
+        : runtimeBackend;
+    var gpuName = string.IsNullOrWhiteSpace(runtimeGpuName) ? capability.GpuName : runtimeGpuName;
+    resourceGpuBackend = backend;
+    resourceGpuName = gpuName;
     var plan = LaunchPlanFor(p, capability);
     var summary = SummaryFor(p.Name);
-    var backend = string.IsNullOrWhiteSpace(capability.Backend) ? "unknown" : capability.Backend;
     var device = gpu.IsExplicit ? gpu.Summary : "Automatic";
     var runtimeName = Path.GetFileName(capability.BinaryPath);
     var server = $"{runtimeName}  ·  {backend} backend  ·  llama.cpp {capability.BuildSummary}";
-    if (!string.IsNullOrWhiteSpace(capability.GpuName)) server += $"  ·  {capability.GpuName}";
+    if (!string.IsNullOrWhiteSpace(gpuName)) server += $"  ·  {gpuName}";
     var vision = p.Vision ? $"On  ·  {Path.GetFileName(p.Mmproj)}" : "Off";
     var lastRun = summary?.LastRunAt is { } last
         ? $"{(summary.LastExitCode == 0 ? "Success" : $"Failed (exit {summary.LastExitCode})")}  ·  {UiText.RelativeTime(last, DateTimeOffset.Now)}" +
@@ -335,7 +340,7 @@ async Task Launch(bool restart = false)
             await runner.StopAsync();
             if (runner.LastExit is { } stopped) SaveActiveRun(stopped);
         }
-        while (!restart && !RunHistory.HasRunForScenario(cfg.RunsDir, profile))
+        while (!restart && !RunHistory.HasRunForProfile(cfg.RunsDir, profile.Name))
         {
             var firstLaunch = ShowFirstLaunchAdvisor(app, cfg, profile, CapabilitiesFor(profile), capabilityCache.Get(cfg.LlamaServer));
             if (firstLaunch == FirstLaunchAction.Cancel) return;
@@ -357,7 +362,7 @@ async Task Launch(bool restart = false)
                     try { store.Save(profile); ReloadProfiles(profile.Name, status); }
                     catch (Exception ex) { UpdateStatus($"Could not save vision setup: {ex.Message}"); }
                 }
-                continue;
+                return;
             }
             break;
         }
@@ -427,6 +432,7 @@ void DuplicateSelected()
 {
     var source = SelectedProfile(); if (source is null) { UpdateStatus("No profile selected."); return; }
     var copy = source.Copy(store.UniqueName(source.Name + "-copy"));
+    copy.SourcePath = "";
     try { store.Save(copy); ReloadProfiles(copy.Name, $"Duplicated as {copy.Name}."); }
     catch (Exception ex) { UpdateStatus(ex.Message); }
 }
@@ -612,7 +618,7 @@ runner.Dispose();
 
 static bool EditProfile(IApplication app, Profile profile, string title)
 {
-    var dialog = new Window { Title = $" {title} ", Width = 96, Height = 54 };
+    var dialog = new Window { Title = $" {title} ", Width = 96, Height = 57 };
     var fields = new Dictionary<string, TextField>();
     TextField Field(string label, string value, int y, int x = 2, int width = 42)
     {
@@ -639,15 +645,16 @@ static bool EditProfile(IApplication app, Profile profile, string title)
     Field("Presence penalty", profile.PresencePenalty.ToString(CultureInfo.InvariantCulture), 37); Field("Frequency penalty", profile.FrequencyPenalty.ToString(CultureInfo.InvariantCulture), 37, 49);
     Field("Batch", profile.Batch.ToString(), 40); Field("Micro batch", profile.UBatch.ToString(), 40, 49);
     Field("Chat template", profile.ChatTemplate, 43); Field("Reasoning / budget", $"{profile.Reasoning} {profile.ReasoningBudget}", 43, 49);
-    Field("Extra args (quoted when needed)", ArgumentText.Format(profile.ExtraArgs), 46, 2, 90);
-    var vision = new CheckBox { X = 2, Y = 49, Text = "Use vision", Value = profile.Vision ? CheckState.Checked : CheckState.UnChecked };
-    var jinja = new CheckBox { X = 20, Y = 49, Text = "Jinja", Value = profile.Jinja ? CheckState.Checked : CheckState.UnChecked };
-    var metrics = new CheckBox { X = 36, Y = 49, Text = "Metrics", Value = profile.Metrics ? CheckState.Checked : CheckState.UnChecked };
-    var mmap = new CheckBox { X = 52, Y = 49, Text = "Disable mmap", Value = profile.NoMmap ? CheckState.Checked : CheckState.UnChecked };
+    Field("Image min tokens (0 = default)", profile.ImageMinTokens.ToString(), 46);
+    Field("Extra args (quoted when needed)", ArgumentText.Format(profile.ExtraArgs), 49, 2, 90);
+    var vision = new CheckBox { X = 2, Y = 52, Text = "Use vision", Value = profile.Vision ? CheckState.Checked : CheckState.UnChecked };
+    var jinja = new CheckBox { X = 20, Y = 52, Text = "Jinja", Value = profile.Jinja ? CheckState.Checked : CheckState.UnChecked };
+    var metrics = new CheckBox { X = 36, Y = 52, Text = "Metrics", Value = profile.Metrics ? CheckState.Checked : CheckState.UnChecked };
+    var mmap = new CheckBox { X = 52, Y = 52, Text = "Disable mmap", Value = profile.NoMmap ? CheckState.Checked : CheckState.UnChecked };
     dialog.Add(vision, jinja, metrics, mmap);
-    var message = new Label { X = 2, Y = 50, Width = 65, Text = "Vision: Qwen3.6-35B-A3B + matching mmproj-BF16.gguf." };
-    var save = new Button { X = 68, Y = 50, Text = "Save", IsDefault = true };
-    var cancel = new Button { X = Pos.Right(save) + 1, Y = 50, Text = "Cancel" };
+    var message = new Label { X = 2, Y = 53, Width = 65, Text = "Vision: supported Qwen model + matching mmproj-BF16.gguf." };
+    var save = new Button { X = 68, Y = 53, Text = "Save", IsDefault = true };
+    var cancel = new Button { X = Pos.Right(save) + 1, Y = 53, Text = "Cancel" };
     dialog.Add(message, save, cancel);
     var accepted = false;
     findMmproj.Accepting += (_, _) =>
@@ -681,6 +688,7 @@ static bool EditProfile(IApplication app, Profile profile, string title)
             profile.RepeatPenalty = ParseDouble(T("Repeat penalty"), "Repeat penalty"); profile.RepeatLastN = ParseInt(T("Repeat last N"), "Repeat last N");
             profile.PresencePenalty = ParseDouble(T("Presence penalty"), "Presence penalty"); profile.FrequencyPenalty = ParseDouble(T("Frequency penalty"), "Frequency penalty");
             profile.Batch = ParseInt(T("Batch"), "Batch"); profile.UBatch = ParseInt(T("Micro batch"), "Micro batch");
+            profile.ImageMinTokens = ParseInt(T("Image min tokens (0 = default)"), "Image minimum tokens");
             profile.ChatTemplate = T("Chat template").Trim();
             var reasoning = T("Reasoning / budget").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             profile.Reasoning = reasoning.FirstOrDefault() ?? "auto"; profile.ReasoningBudget = reasoning.Length > 1 ? ParseInt(reasoning[1], "Reasoning budget") : -1;
@@ -823,16 +831,17 @@ static FirstLaunchAction ShowFirstLaunchAdvisor(IApplication app, AppConfig cfg,
     window.Add(new Label { X = 1, Y = 1, Width = Dim.Fill(2), Height = 22, Text = report });
     var action = FirstLaunchAction.Cancel;
     var cancel = new Button { X = 1, Y = 25, Text = "Cancel" };
-    var vision = new Button { X = Pos.Right(cancel) + 2, Y = 25, Text = "Set up vision" };
-    var edit = new Button { X = Pos.Right(vision) + 2, Y = 25, Text = "Edit profile" };
+    Button? vision = supportsVision ? new Button { X = Pos.Right(cancel) + 2, Y = 25, Text = "Set up vision" } : null;
+    var edit = new Button { X = vision is null ? Pos.Right(cancel) + 2 : Pos.Right(vision) + 2, Y = 25, Text = "Edit profile" };
     var preview = new Button { X = Pos.Right(edit) + 2, Y = 25, Text = "Preview command" };
-    var launch = new Button { X = Pos.Right(preview) + 2, Y = 25, Text = "Launch", IsDefault = true };
+    var launch = new Button { X = Pos.Right(preview) + 2, Y = 25, Text = "Launch" };
     cancel.Accepting += (_, _) => app.RequestStop();
-    vision.Accepting += (_, _) => { action = FirstLaunchAction.SetupVision; app.RequestStop(); };
+    if (vision is not null) vision.Accepting += (_, _) => { action = FirstLaunchAction.SetupVision; app.RequestStop(); };
     edit.Accepting += (_, _) => { action = FirstLaunchAction.Edit; app.RequestStop(); };
     preview.Accepting += (_, _) => { action = FirstLaunchAction.Preview; app.RequestStop(); };
     launch.Accepting += (_, _) => { action = FirstLaunchAction.Launch; app.RequestStop(); };
-    window.Add(cancel, vision, edit, preview, launch);
+    if (vision is null) window.Add(cancel, edit, preview, launch);
+    else window.Add(cancel, vision, edit, preview, launch);
     launch.SetFocus();
     app.Run(window);
     return action;
@@ -856,7 +865,7 @@ static bool ShowVisionSetup(IApplication app, Profile profile)
     {
         message.Text = supportsVision
             ? $"This model can accept images with a matching vision projector.\n\nModel: {Path.GetFileName(profile.Model)}\nFolder: {modelFolder}\n\nPut {VisionProjectorResolver.ExpectedProjectorName} from this model family in that folder, then refresh.\n{scanMessage ?? match?.Message ?? "No projector has been selected."}"
-            : $"Vision setup is not available for {Path.GetFileName(profile.Model)}.\n\nlltop currently supports vision only for Qwen3.6-35B-A3B model GGUFs with\n{VisionProjectorResolver.ExpectedProjectorName}. You can still launch this model for text chat.";
+            : $"Vision setup is not available for {Path.GetFileName(profile.Model)}.\n\nlltop currently supports vision for Qwen3.6-35B-A3B and Qwen3.8-27B model GGUFs with\n{VisionProjectorResolver.ExpectedProjectorName}. You can still launch this model for text chat.";
     }
 
     Describe();
@@ -877,9 +886,11 @@ static bool ShowVisionSetup(IApplication app, Profile profile)
             var candidate = profile.Copy(profile.Name);
             candidate.Vision = true;
             candidate.Mmproj = path;
+            if (candidate.ImageMinTokens == 0) candidate.ImageMinTokens = 1024;
             candidate.Validate();
             profile.Vision = candidate.Vision;
             profile.Mmproj = candidate.Mmproj;
+            profile.ImageMinTokens = candidate.ImageMinTokens;
             changed = true;
             app.RequestStop();
         }

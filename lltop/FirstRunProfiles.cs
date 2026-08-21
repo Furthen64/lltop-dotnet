@@ -110,7 +110,7 @@ static class FirstRunProfiles
         var modelName = Path.GetFileNameWithoutExtension(modelPath);
         if (modelName.Contains("deepseek", StringComparison.OrdinalIgnoreCase)) ApplyDeepSeek(profile, modelName);
         else if (IsGptOss(modelName)) ApplyGptOss(profile);
-        else if (modelName.Contains("qwen", StringComparison.OrdinalIgnoreCase)) ApplyQwen(profile);
+        else if (modelName.Contains("qwen", StringComparison.OrdinalIgnoreCase)) ApplyQwen(profile, modelName);
         else ApplyUnknown(profile);
         ApplyHardwareDefaults(profile, capabilities);
         ApplyCapabilityDefaults(profile, capabilities);
@@ -151,7 +151,7 @@ static class FirstRunProfiles
         return compact.Contains("gptoss", StringComparison.OrdinalIgnoreCase);
     }
 
-    static void ApplyQwen(Profile profile)
+    static void ApplyQwen(Profile profile, string modelName)
     {
         profile.Alias = "qwen";
         profile.Ctx = 65536;
@@ -162,8 +162,11 @@ static class FirstRunProfiles
         profile.TopP = .95;
         profile.TopK = 20;
         profile.MinP = 0;
-        profile.ChatTemplate = "chatml";
+        // Let llama.cpp use the model's embedded template, which carries model-specific
+        // tokens and multimodal handling that a generic ChatML override would discard.
+        profile.ChatTemplate = "";
         profile.Reasoning = "auto";
+        if (modelName.Contains("qwen3.8", StringComparison.OrdinalIgnoreCase)) profile.ImageMinTokens = 1024;
     }
 
     static void ApplyGptOss(Profile profile)
