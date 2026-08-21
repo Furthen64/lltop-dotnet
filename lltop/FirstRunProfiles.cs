@@ -156,9 +156,9 @@ static class FirstRunProfiles
         profile.Alias = "qwen";
         profile.Ctx = 65536;
         profile.Ngl = 99;
-        profile.CacheK = "q4_0";
-        profile.CacheV = "q4_0";
-        profile.Temp = .6;
+        profile.CacheK = "q8_0";
+        profile.CacheV = "q8_0";
+        profile.Temp = .1;
         profile.TopP = .95;
         profile.TopK = 20;
         profile.MinP = 0;
@@ -189,9 +189,9 @@ static class FirstRunProfiles
         profile.Alias = "deepseek";
         profile.Ctx = 65536;
         profile.Ngl = 99;
-        profile.CacheK = "q4_0";
-        profile.CacheV = "q4_0";
-        profile.Temp = .6;
+        profile.CacheK = "q8_0";
+        profile.CacheV = "q8_0";
+        profile.Temp = .1;
         profile.TopP = .95;
         profile.TopK = 20;
         profile.MinP = 0;

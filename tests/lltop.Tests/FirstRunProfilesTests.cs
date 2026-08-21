@@ -52,6 +52,18 @@ public sealed class FirstRunProfilesTests : IDisposable
         Assert.Equal(context, profile.Ctx);
     }
 
+    [Theory]
+    [InlineData("Qwen3-Coder-30B.gguf")]
+    [InlineData("DeepSeek-V3-Q4.gguf")]
+    public void CreateForModel_UsesConservativeSamplingAndQ8Caches(string fileName)
+    {
+        var profile = FirstRunProfiles.CreateForModel(Config(), "generated", Path.Combine(root, fileName));
+
+        Assert.Equal(.1, profile.Temp);
+        Assert.Equal("q8_0", profile.CacheK);
+        Assert.Equal("q8_0", profile.CacheV);
+    }
+
     [Fact]
     public void CreateForModel_UsesSimpleUnknownDefaults()
     {

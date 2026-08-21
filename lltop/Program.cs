@@ -75,8 +75,8 @@ void ApplyLayout()
     var helpHeight = expandedHelp ? 6 : 2;
     help.Height = helpHeight;
     help.Text = expandedHelp
-        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+R/F5] Find models\nBENCHMARK   [b] Setup/start   [B] Cancel   idle server required   reports → benchmarks_dir\nLOG & RUNS  [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nHELP        [h/?] Show fewer keys"
-        : "[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [b] Benchmark\n[↑/↓] Select   [s] Stop   [H] History   [h/?] All keys   [q] Quit";
+        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+R/F5] Find models\nBENCHMARK   [b] Setup/start   [B] Cancel   idle server required   reports → benchmarks_dir\nLOG & RUNS  [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nTHEME       [t] Cycle theme ({LltopTheme.CurrentName})   [h/?] Show fewer keys"
+        : $"[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [b] Benchmark\n[↑/↓] Select   [s] Stop   [H] History   [t] Theme: {LltopTheme.CurrentName}   [h/?] All keys   [q] Quit";
     var reserved = 10 + helpHeight + 1;
     if (win.Viewport.Width is > 0 and < 84)
     {
@@ -515,6 +515,21 @@ void CancelBenchmark()
     UpdateStatus("Cancelling benchmark and stopping its server…");
 }
 
+void CycleTheme()
+{
+    var themes = LltopTheme.Ids.ToList();
+    var current = themes.FindIndex(x => x.Equals(LltopTheme.CurrentName, StringComparison.OrdinalIgnoreCase));
+    var next = themes[(current + 1) % themes.Count];
+    LltopTheme.Select(next);
+    cfg.Theme = next;
+    try { cfg.Save(); }
+    catch (Exception ex) { UpdateStatus($"Theme changed for this session but could not save: {ex.Message}"); return; }
+    ApplyLayout();
+    RefreshProfileItems(runningProfile);
+    RefreshLogs();
+    UpdateStatus($"Theme changed to {LltopTheme.CurrentName}.");
+}
+
 void NewProfile()
 {
     var p = Profile.CreateDefault(cfg, store.UniqueName("new-profile"));
@@ -655,6 +670,7 @@ app.Keyboard.KeyDown += (_, key) =>
     }
     else if (text == "b") { _ = RunBenchmark(); key.Handled = true; }
     else if (text == "B") { CancelBenchmark(); key.Handled = true; }
+    else if (text.Equals("t", StringComparison.OrdinalIgnoreCase)) { CycleTheme(); key.Handled = true; }
     else if (text.Equals("l", StringComparison.OrdinalIgnoreCase))
     {
         if (logAutoScroll) PauseLogFollow(); else ResumeLogFollow();

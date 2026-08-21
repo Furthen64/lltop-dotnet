@@ -42,12 +42,29 @@ internal static class LltopTheme
                 AnalysisText: new(225, 235, 255),
                 MemoryFullyOnGpu: new(95, 255, 255),
                 MemoryTight: new(255, 175, 0),
-                MemoryPartialOffload: new(255, 95, 175))
+                MemoryPartialOffload: new(255, 95, 175)),
+            ["nord"] = new(
+                "Nord",
+                PanelBorder: new(136, 192, 208),
+                Title: new(136, 192, 208),
+                Hotkey: new(163, 190, 140),
+                Success: new(163, 190, 140),
+                Warning: new(235, 203, 139),
+                Error: new(191, 97, 106),
+                Highlight: new(129, 161, 193),
+                SelectedText: new(236, 239, 244),
+                SelectedBackground: new(94, 129, 172),
+                AnalysisBackground: new(46, 52, 64),
+                AnalysisText: new(236, 239, 244),
+                MemoryFullyOnGpu: new(136, 192, 208),
+                MemoryTight: new(235, 203, 139),
+                MemoryPartialOffload: new(180, 142, 173))
         };
 
     static LltopThemeDefinition current = Themes["midnight"];
 
     internal static IReadOnlyList<string> Names => Themes.Values.Select(x => x.Name).OrderBy(x => x, StringComparer.Ordinal).ToList();
+    internal static IReadOnlyList<string> Ids => Themes.Keys.OrderBy(x => x, StringComparer.Ordinal).ToList();
     internal static string CurrentName => current.Name;
 
     internal static bool Select(string? name)

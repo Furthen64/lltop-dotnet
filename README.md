@@ -59,8 +59,10 @@ history. JSON and self-contained HTML reports are saved in `benchmarks_dir`
 
 ## Theme
 
-lltop currently ships with the `midnight` theme, which is also the default.
-Set `theme = "midnight"` in `~/.config/lltop/config.toml`. Themes use semantic
+lltop ships with the `midnight` (default) and `nord` themes. Press `t` in the
+main window to cycle between them; the choice is saved to configuration. You can
+also set `theme = "midnight"` or `theme = "nord"` in
+`~/.config/lltop/config.toml`. Themes use semantic
 tokens for selection, hotkeys, warnings, errors, and memory-fit states, so
 future palettes can change the appearance without changing the meaning of
 `FULLY ON GPU`, `TIGHT`, or `PARTIAL OFFLOAD REQUIRED`.
@@ -82,3 +84,11 @@ Verify changes with:
 dotnet build lltop/lltop.csproj --no-restore
 dotnet test tests/lltop.Tests/lltop.Tests.csproj --no-restore
 ```
+
+## Model catalog refresh
+
+`./refresh_models.sh` builds a small local SQLite catalog from Hugging Face,
+the Ollama Library, ModelScope, or all three. It asks which source to use and
+stores its cache under `~/.local/share/lltop/model-catalog.sqlite` by default
+(override with `XDG_DATA_HOME` or pass `--db PATH`). The catalog is optional
+and is not used to launch models yet.

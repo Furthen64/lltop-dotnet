@@ -42,6 +42,7 @@ ScaffoldingReadMe.txt
 # Others
 ~$*
 *~
+__pycache__/
 CodeCoverage/
 
 # MSBuild Binary and Structured Log
