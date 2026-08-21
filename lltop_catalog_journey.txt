@@ -1,0 +1,50 @@
+lltop catalog journey
+====================
+
+lltop is a local llama-server control center. Its catalog helps a user find the
+next model worth downloading; it does not need to become a model downloader or
+an Ollama wrapper.
+
+User journey
+------------
+
+1. “I want a new coding model that fits my machine.”
+
+2. Browse the catalog by capability or intended use.
+   Examples: tools, thinking, vision, embeddings, coding, agentic work,
+   multilingual use.
+
+3. Open a promising model family.
+   See its source, description, variants, and what each source claims.
+
+4. Inspect a small, on-demand GGUF quantization shortlist.
+   Show popular linked repositories, quantizer, representative GGUF file, and
+   download size in GiB.
+
+5. Open the source page and download the chosen model manually.
+
+6. Put the downloaded file in the configured local models directory.
+
+7. lltop discovers the exact local GGUF, generates a safe starting profile,
+   and starts llama-server.
+
+8. lltop measures what really happens on this machine: memory fit, context,
+   cache choices, throughput, failures, and benchmark results.
+
+Boundaries
+----------
+
+Catalog
+  What exists, what sources claim, and where to find a suitable artifact.
+
+Local inventory
+  What the user actually downloaded, including exact GGUF facts and disk size.
+
+Profiles
+  How lltop launches the exact local file with llama-server.
+
+Benchmarks and history
+  What actually works well on the user's hardware.
+
+The catalog may guide a user's choice, but exact local GGUF facts and measured
+runtime behavior remain the authority for launching a model.
