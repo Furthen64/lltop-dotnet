@@ -5,10 +5,12 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ "${1:-}" == "--help" ]]; then
     cat <<'EOF'
-Usage: ./refresh_models.sh [--db PATH] [--limit COUNT]
+Usage: ./refresh_models.sh [--db PATH] [--limit COUNT] [--force]
 
-Prompts for Hugging Face, Ollama Library, or both, then refreshes the local
-SQLite catalog. The options are passed to the catalog importer.
+Prompts for Hugging Face, Ollama Library, ModelScope, or all three, then
+refreshes the local SQLite catalog. The options are passed to the catalog
+importer. Successful sources are refreshed at most once per week unless
+--force is supplied.
 EOF
     exit 0
 fi

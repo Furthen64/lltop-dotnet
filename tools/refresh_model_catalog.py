@@ -10,7 +10,7 @@ import os
 import re
 import sqlite3
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -27,6 +27,11 @@ MODELSCOPE_URL = (
 )
 CAPABILITY_TAGS = {"vision", "tools", "thinking", "embedding", "audio", "cloud"}
 INTENDED_USE_TAGS = {"code", "coding", "agent", "agents", "reasoning", "multilingual", "math", "rag"}
+HAN_CHARACTER_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+MAX_SOURCE_ENTRIES = 100
+MAX_MODELSCOPE_ENTRIES = 50
+MAX_OLLAMA_VARIANTS_PER_FAMILY = 12
+REFRESH_INTERVAL = timedelta(days=7)
 
 
 def default_database() -> Path:
@@ -45,7 +50,12 @@ def clean_html(value: str) -> str:
     return " ".join(html.unescape(value).split())
 
 
-def ollama_entries() -> list[dict[str, object]]:
+def display_description(value: str) -> str:
+    """Keep the first catalog UI English-first without translating source claims."""
+    return "<Chinese description>" if len(HAN_CHARACTER_PATTERN.findall(value)) > 1 else value
+
+
+def ollama_entries(limit: int) -> list[dict[str, object]]:
     page = fetch(OLLAMA_LIBRARY_URL).decode("utf-8")
     cards = re.finditer(
         r'<li[^>]*>\s*<a href="/library/(?P<id>[^"]+)"[^>]*>(?P<body>.*?)</a>\s*</li>',
@@ -53,7 +63,9 @@ def ollama_entries() -> list[dict[str, object]]:
         re.DOTALL,
     )
     entries: list[dict[str, object]] = []
-    for card in cards:
+    for family_count, card in enumerate(cards):
+        if family_count >= limit:
+            break
         family = card.group("id")
         body = card.group("body")
         description_match = re.search(r'<p class="max-w-lg[^"]*">(?P<text>.*?)</p>', body, re.DOTALL)
@@ -71,7 +83,7 @@ def ollama_entries() -> list[dict[str, object]]:
         # Library badges are family-level. Do not claim that every size supports them.
         entries.append({"model_id": family, "family": family, "variant": None, "description": description,
                         "capabilities": capabilities, "intended_uses": [], "capability_scope": "family", "url": url})
-        for variant in dict.fromkeys(variants):
+        for variant in list(dict.fromkeys(variants))[:MAX_OLLAMA_VARIANTS_PER_FAMILY]:
             entries.append({"model_id": f"{family}:{variant}", "family": family, "variant": variant,
                             "description": "", "capabilities": [], "intended_uses": [],
                             "capability_scope": "none", "url": url})
@@ -109,7 +121,7 @@ def huggingface_entries(limit: int) -> list[dict[str, object]]:
 
 
 def modelscope_entries(limit: int) -> list[dict[str, object]]:
-    payload = json.loads(fetch(MODELSCOPE_URL.format(limit=min(limit, 50))))
+    payload = json.loads(fetch(MODELSCOPE_URL.format(limit=min(limit, MAX_MODELSCOPE_ENTRIES))))
     data = payload.get("data") if isinstance(payload, dict) else None
     models = data.get("models") if isinstance(data, dict) else None
     if not isinstance(models, list):
@@ -166,10 +178,15 @@ def initialize_database(connection: sqlite3.Connection) -> None:
     )
 
 
-def replace_source(connection: sqlite3.Connection, source: str, source_url: str, entries: list[dict[str, object]]) -> int:
+def replace_source(connection: sqlite3.Connection, source: str, source_url: str, entries: list[dict[str, object]]) -> tuple[int, int, int, int]:
     fetched_at = datetime.now(UTC).isoformat()
+    previous_ids = {
+        row[0]
+        for row in connection.execute("SELECT model_id FROM catalog_models WHERE source = ?", (source,))
+    }
+    current_ids = {str(entry["model_id"]) for entry in entries}
     rows = [
-        (source, entry["model_id"], entry["family"], entry["variant"], entry["description"],
+        (source, entry["model_id"], entry["family"], entry["variant"], display_description(str(entry["description"])),
          json.dumps(entry["capabilities"]), json.dumps(entry["intended_uses"]), entry["capability_scope"],
          entry["url"], fetched_at)
         for entry in entries
@@ -190,7 +207,12 @@ def replace_source(connection: sqlite3.Connection, source: str, source_url: str,
                    status = excluded.status, detail = excluded.detail""",
             (source, source_url, fetched_at),
         )
-    return len(rows)
+    return (
+        len(current_ids - previous_ids),
+        len(current_ids & previous_ids),
+        len(previous_ids - current_ids),
+        len(current_ids),
+    )
 
 
 def record_failure(connection: sqlite3.Connection, source: str, source_url: str, error: Exception) -> None:
@@ -204,31 +226,53 @@ def record_failure(connection: sqlite3.Connection, source: str, source_url: str,
         )
 
 
+def next_refresh_at(connection: sqlite3.Connection, source: str, now: datetime) -> datetime | None:
+    row = connection.execute(
+        "SELECT fetched_at, status FROM catalog_sources WHERE source = ?", (source,)
+    ).fetchone()
+    if row is None or row[1] != "ok":
+        return None
+    try:
+        refreshed_at = datetime.fromisoformat(row[0])
+        if refreshed_at.tzinfo is None:
+            refreshed_at = refreshed_at.replace(tzinfo=UTC)
+        return refreshed_at + REFRESH_INTERVAL
+    except (TypeError, ValueError):
+        return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Refresh lltop's local model catalog.")
     parser.add_argument("--source", choices=("huggingface", "ollama", "modelscope", "all"), required=True)
     parser.add_argument("--db", type=Path, default=default_database(), help="SQLite database path")
-    parser.add_argument("--limit", type=int, default=100, help="Maximum popular Hugging Face models to import")
+    parser.add_argument("--limit", type=int, default=MAX_SOURCE_ENTRIES,
+                        help="maximum Hugging Face models or Ollama families to import (default: 100)")
+    parser.add_argument("--force", action="store_true", help="refresh successful sources even if cached within seven days")
     args = parser.parse_args()
-    if args.limit < 1:
-        parser.error("--limit must be at least 1")
+    if args.limit < 1 or args.limit > MAX_SOURCE_ENTRIES:
+        parser.error(f"--limit must be between 1 and {MAX_SOURCE_ENTRIES}")
 
     args.db.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(args.db)
     initialize_database(connection)
     jobs = []
     if args.source in ("ollama", "all"):
-        jobs.append(("ollama-library", OLLAMA_LIBRARY_URL, ollama_entries))
+        jobs.append(("ollama-library", OLLAMA_LIBRARY_URL, lambda: ollama_entries(args.limit)))
     if args.source in ("huggingface", "all"):
         jobs.append(("huggingface", HUGGING_FACE_URL.format(limit=args.limit), lambda: huggingface_entries(args.limit)))
     if args.source in ("modelscope", "all"):
-        jobs.append(("modelscope", MODELSCOPE_URL.format(limit=min(args.limit, 50)), lambda: modelscope_entries(args.limit)))
+        jobs.append(("modelscope", MODELSCOPE_URL.format(limit=min(args.limit, MAX_MODELSCOPE_ENTRIES)), lambda: modelscope_entries(args.limit)))
 
     failures = 0
     for source, source_url, load in jobs:
+        now = datetime.now(UTC)
+        refresh_after = next_refresh_at(connection, source, now)
+        if not args.force and refresh_after is not None and now < refresh_after:
+            print(f"{source}: using cached data (next refresh after {refresh_after.date().isoformat()}; use --force to refresh now)")
+            continue
         try:
-            count = replace_source(connection, source, source_url, load())
-            print(f"{source}: stored {count} catalog entries")
+            added, updated, removed, total = replace_source(connection, source, source_url, load())
+            print(f"{source}: added {added}, updated {updated}, removed {removed} ({total} total entries)")
         except (URLError, TimeoutError, ValueError) as error:
             record_failure(connection, source, source_url, error)
             print(f"{source}: refresh failed ({error})", file=sys.stderr)

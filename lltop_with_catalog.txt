@@ -1,0 +1,50 @@
+• Right now, lltop is a thoughtful local llama-server control center:
+
+  - configure and launch local GGUF models through profiles;
+  - see logs, throughput, GPU offload, memory failures, and run history;
+  - benchmark context/cache trade-offs;
+  - discover local files and create starter profiles;
+  - now, separately, browse a small cached online model catalog.
+
+  Its strongest identity is not “another chat app” or “a model downloader.” It is a local-model operations desk: “what do I have, how does it run, what happened, and what should I try next?”
+
+  What could be better, in priority order:
+
+  1. Make the catalog useful as a catalog first.
+
+     You are doing this now. Browse/search/sort, source boundaries, per-model quantization shortlists, sensible English presentation. Let it earn its place before connecting it to profiles.
+
+  2. Improve local-model visibility.
+
+     The app knows how to launch files, but it could eventually show a first-class local inventory: model path, GGUF metadata, disk size, architecture, context, quantization, vision support, and whether it has a profile. This is valuable
+     even without online matching.
+
+  3. Make hardware fit more actionable.
+
+     lltop already observes memory and benchmarks well. The next leap is turning that into guidance: “this profile fits at 32k/Q8,” “reduce context before reducing cache precision,” “this artifact is too large for your hardware.”
+
+  4. Reduce the magic in first-run profiles.
+
+     Filename-family heuristics are a useful temporary bridge, but the longer-term goal is explainable defaults: embedded template, server capabilities, local GGUF facts, then optional catalog claims. The user should always see why a
+     setting was chosen.
+
+  5. Tighten the user-facing workflow.
+
+     Root helper scripts are becoming a nice low-friction layer:
+      - checkreqs.sh
+      - build.sh
+      - launch.sh
+      - refresh_models.sh
+      - catalog.sh
+
+     A small “what should I run?” section and progressively richer output gets a lot of value without making the TUI crowded.
+
+  The healthy boundary is:
+
+  Catalog: what exists and what sources claim
+  Local inventory: what the user has
+  Profiles: how llama-server runs it
+  Benchmarks/history: what actually works on this machine
+
+  Eventually those can inform each other, but they should remain separate concepts.
+

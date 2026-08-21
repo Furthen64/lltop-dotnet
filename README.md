@@ -27,7 +27,7 @@ Run with:
 
 ```sh
 ./checkreqs.sh
-./lltop/build.sh
+./build.sh
 ./launch.sh
 ```
 
@@ -91,4 +91,33 @@ dotnet test tests/lltop.Tests/lltop.Tests.csproj --no-restore
 the Ollama Library, ModelScope, or all three. It asks which source to use and
 stores its cache under `~/.local/share/lltop/model-catalog.sqlite` by default
 (override with `XDG_DATA_HOME` or pass `--db PATH`). The catalog is optional
-and is not used to launch models yet.
+and is not used to launch models yet. See [USER_CATALOG_TEST.md](USER_CATALOG_TEST.md)
+for a quick user test. View the cached catalog with `./catalog.sh ollama` or
+search every source with `./catalog.sh --search qwen`. Add `--sort family` or
+`--sort size` to arrange the results.
+
+Refreshes are deliberately bounded: Hugging Face imports at most 100 models,
+ModelScope at most 50, and Ollama at most 100 families with 12 listed variants
+per family. Pass `--limit N` (1–100) to lower the Hugging Face/Ollama bound.
+
+### Refresh behavior and network use
+
+Catalog refresh is user-triggered; lltop does not poll sources or refresh at
+application startup. Each successfully refreshed source is reused for seven
+days. Run `./refresh_models.sh --force` when you intentionally want current
+data sooner. A failed refresh preserves the last successful cache and makes no
+automatic retry. The importer identifies itself with a stable `User-Agent`,
+uses the Hugging Face and ModelScope APIs where available, and keeps requests
+sequential. Sources can still rate-limit or change their response formats, so
+the catalog is always optional and best-effort.
+
+For a specific upstream Hugging Face model, fetch and cache only its three most
+downloaded linked GGUF quantization repositories with:
+
+```sh
+./catalog.sh --quantizations Qwen/Qwen2.5-7B-Instruct
+```
+
+Use `--refresh` to query Hugging Face again, or `--top N` to cache more than
+the default three repositories (for an existing cached result, combine them as
+`--refresh --top N`). Quantization lookups are capped at 10 repositories.
