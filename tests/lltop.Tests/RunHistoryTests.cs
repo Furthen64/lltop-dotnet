@@ -52,5 +52,24 @@ public sealed class RunHistoryTests : IDisposable
         Assert.False(RunHistory.HasRunForProfile(dir, duplicate.Name));
     }
 
+    [Fact]
+    public void SavesResourceSamplesWithRun()
+    {
+        var profile = new Profile { Name = "qwen", Model = "/m.gguf" };
+        var sample = new RunResourceSample
+        {
+            Timestamp = DateTimeOffset.Now,
+            VramUsedBytes = 8L * 1024 * 1024 * 1024,
+            VramTotalBytes = 16L * 1024 * 1024 * 1024,
+            SystemRamUsedBytes = 31L * 1024 * 1024 * 1024,
+            SystemRamTotalBytes = 32L * 1024 * 1024 * 1024
+        };
+        RunHistory.Save(dir, RunRecord.Create(profile, "server", sample.Timestamp, sample.Timestamp, 1, "exit", new ServerStats(), resourceSamples: [sample]));
+
+        var run = Assert.Single(RunHistory.ForProfile(dir, profile.Name)).Record;
+        Assert.Single(run.ResourceSamples);
+        Assert.Equal(sample.SystemRamUsedBytes, run.ResourceSamples[0].SystemRamUsedBytes);
+    }
+
     public void Dispose() { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
 }

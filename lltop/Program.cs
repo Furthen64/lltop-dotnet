@@ -25,11 +25,13 @@ Profile? activeProfile = null;
 var serverStats = new ServerStats();
 var activeRunGate = new object();
 var logLines = new List<string>();
+var activeRunSamples = new List<RunResourceSample>();
 var profileItems = new ObservableCollection<string>();
 var historySummaries = new Dictionary<string, ProfileRunSummary>(StringComparer.OrdinalIgnoreCase);
 var closing = false;
 var logAutoScroll = true;
 var logScrollRow = 0;
+var showingResourceGraph = false;
 DateTimeOffset? logAutoScrollPausedAt = null;
 var expandedHelp = false;
 var externalMonitor = new ExternalServerMonitor(cfg);
@@ -54,7 +56,7 @@ var statusFrame = new FrameView { Title = " Selected profile / server ", X = 0, 
 var status = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(), Text = "Loading…" };
 statusFrame.Add(status);
 var help = new Label { X = 1, Y = Pos.Bottom(statusFrame), Width = Dim.Fill(2), Height = 3,
-    Text = "[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [p] Preview\n[↑/↓] Select   [s] Stop   [H] History   [h/?] All keys   [q] Quit" };
+    Text = "[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [p] Preview\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [h/?] All keys   [q] Quit" };
 var resourceStrip = new ResourceStripView { X = 1, Y = Pos.Bottom(help), Width = Dim.Fill(2) };
 win.Add(banner, profileFrame, logFrame, statusFrame, help, resourceStrip);
 LltopTheme.Apply([profileFrame, logFrame, statusFrame], banner, profileList, logView, status, help, logStatus);
@@ -75,8 +77,8 @@ void ApplyLayout()
     var helpHeight = expandedHelp ? 6 : 2;
     help.Height = helpHeight;
     help.Text = expandedHelp
-        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+R/F5] Find models\nBENCHMARK   [b] Setup/start   [B] Cancel   idle server required   reports → benchmarks_dir\nLOG & RUNS  [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nTHEME       [t] Cycle theme ({LltopTheme.CurrentName})   [h/?] Show fewer keys"
-        : $"[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [b] Benchmark\n[↑/↓] Select   [s] Stop   [H] History   [t] Theme: {LltopTheme.CurrentName}   [h/?] All keys   [q] Quit";
+        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+R/F5] Find models\nBENCHMARK   [b] Setup/start   [B] Cancel   idle server required   reports → benchmarks_dir\nLOG & RUNS  [g] Resource graph   [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nTHEME       [t] Cycle theme ({LltopTheme.CurrentName})   [h/?] Show fewer keys"
+        : $"[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [b] Benchmark\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [t] Theme: {LltopTheme.CurrentName}   [h/?] All keys   [q] Quit";
     var reserved = 10 + helpHeight + 1;
     if (win.Viewport.Width is > 0 and < 84)
     {
@@ -194,6 +196,24 @@ void UpdateStatus(string message = "")
 
 void RefreshLogs()
 {
+    if (showingResourceGraph)
+    {
+        var profile = SelectedProfile();
+        var live = profile is not null && profile.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase) && runner.IsActive;
+        RunRecord? latest = null;
+        if (profile is not null && !live)
+        {
+            try { latest = RunHistory.ForProfile(cfg.RunsDir, profile.Name).FirstOrDefault()?.Record; }
+            catch { }
+        }
+        List<RunResourceSample> samples;
+        lock (activeRunGate) samples = live ? [.. activeRunSamples] : latest?.ResourceSamples ?? [];
+        logFrame.Title = " Resource graph ";
+        logView.Text = profile is null ? "No profile selected." : RunResourceGraph.Format(profile.Name, latest, samples, logView.Viewport.Width, live);
+        logView.MoveHome();
+        logStatus.Text = live ? "GRAPH  live resource samples · [g] runtime log" : "GRAPH  latest recorded run · [g] runtime log";
+        return;
+    }
     var showingBenchmark = benchmarkActive && activeBenchmark is not null;
     var showingLogs = !showingBenchmark && (runner.IsActive || externalServer is not null || logLines.Count > 0);
     logFrame.Title = showingBenchmark ? " Benchmark progress " : showingLogs ? " Live log " : " Profile overview ";
@@ -331,7 +351,9 @@ void SaveActiveRun(ServerExit exit)
         stats = serverStats;
     }
     if (runner.StartedAt is not { } started) return;
-    RunHistory.Save(cfg.RunsDir, RunRecord.Create(profile, runner.Command, started, DateTimeOffset.Now, exit.ExitCode, exit.Requested ? "stopped" : "exit", stats, runner.LogPath));
+    List<RunResourceSample> samples;
+    lock (activeRunGate) samples = [.. activeRunSamples];
+    RunHistory.Save(cfg.RunsDir, RunRecord.Create(profile, runner.Command, started, DateTimeOffset.Now, exit.ExitCode, exit.Requested ? "stopped" : "exit", stats, runner.LogPath, samples));
     historySummaries.Remove(profile.Name);
 }
 
@@ -438,7 +460,7 @@ async Task Launch(bool restart = false)
             }
         }
         logLines.Clear(); RefreshLogs();
-        lock (activeRunGate) { serverStats = new ServerStats(); activeProfile = profile.Copy(profile.Name); }
+        lock (activeRunGate) { serverStats = new ServerStats(); activeProfile = profile.Copy(profile.Name); activeRunSamples.Clear(); }
         runningProfile = profile.Name;
         await runner.StartAsync(plan, profile, cfg);
         RefreshProfileItems(profile.Name);
@@ -676,6 +698,12 @@ app.Keyboard.KeyDown += (_, key) =>
         if (logAutoScroll) PauseLogFollow(); else ResumeLogFollow();
         UpdateStatus($"Log auto-scroll = {logAutoScroll}."); key.Handled = true;
     }
+    else if (text.Equals("g", StringComparison.OrdinalIgnoreCase))
+    {
+        showingResourceGraph = !showingResourceGraph;
+        RefreshLogs();
+        key.Handled = true;
+    }
     else if (text == "H")
     {
         var p = SelectedProfile();
@@ -724,7 +752,19 @@ _ = Task.Run(async () =>
         try
         {
             var snapshot = await resourceProvider.GetSnapshotAsync(monitorCancellation.Token);
-            app.Invoke(() => resourceStrip.Snapshot = snapshot);
+            app.Invoke(() =>
+            {
+                resourceStrip.Snapshot = snapshot;
+                lock (activeRunGate)
+                {
+                    if (runner.IsActive && activeProfile is not null)
+                    {
+                        activeRunSamples.Add(RunResourceSample.From(snapshot));
+                        if (activeRunSamples.Count > 1800) activeRunSamples.RemoveAt(0);
+                    }
+                }
+                if (showingResourceGraph) RefreshLogs();
+            });
             await Task.Delay(TimeSpan.FromSeconds(2), monitorCancellation.Token);
         }
         catch (OperationCanceledException) when (monitorCancellation.IsCancellationRequested) { break; }

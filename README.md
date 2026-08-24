@@ -11,7 +11,8 @@ A .NET 10 + Terminal.Gui v2 control center for llama.cpp's `llama-server`.
 - Display live stdout/stderr, PID, uptime, bind address, model, and launch state.
 - Parse and display throughput, progress, GPU offload, memory/context data, errors, and hints.
 - Persist a timestamped log for each run.
-- Persist JSON run history with per-profile performance summaries, sparklines, and editable notes.
+- Persist JSON run history with per-profile performance summaries, sparklines, editable notes, and two-second resource samples.
+- Press `g` on a selected profile to replace the runtime log with an ASCII graph of the latest run's VRAM and system-RAM use, including sampled peaks after a crash.
 - Warn before repeating a recently failed startup configuration.
 - Detect externally started `llama-server` processes and follow their logs when available.
 - Copy launch commands, toggle log autoscroll, and inspect history from the keyboard.
@@ -35,7 +36,7 @@ Run with:
 and prints installation instructions when it is missing.
 
 The main keys are shown in the application footer. Press `d` to duplicate the
-selected profile, `H` for run history and notes, `c` to copy the launch command,
+selected profile, `H` for run history and notes, `g` for its resource graph, `c` to copy the launch command,
 and `l` to toggle log autoscroll. Profiles
 are stored under `~/.config/lltop/profiles` and run records under
 `~/.config/lltop/runs` by default.

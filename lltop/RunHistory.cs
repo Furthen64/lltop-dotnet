@@ -43,8 +43,9 @@ internal sealed class RunRecord
     [JsonPropertyName("gpu_context_mib")] public int GpuContextMiB { get; set; }
     [JsonPropertyName("gpu_compute_mib")] public int GpuComputeMiB { get; set; }
     [JsonPropertyName("issues")] public List<RunIssue> Issues { get; set; } = [];
+    [JsonPropertyName("resource_samples")] public List<RunResourceSample> ResourceSamples { get; set; } = [];
 
-    public static RunRecord Create(Profile p, string command, DateTimeOffset started, DateTimeOffset ended, int exitCode, string reason, ServerStats stats, string logPath = "") => new()
+    public static RunRecord Create(Profile p, string command, DateTimeOffset started, DateTimeOffset ended, int exitCode, string reason, ServerStats stats, string logPath = "", IEnumerable<RunResourceSample>? resourceSamples = null) => new()
     {
         RunId = $"{started:yyyyMMdd_HHmmss}_{ProfileStore.Slugify(p.Name)}", ProfileName = p.Name,
         StartedAt = started, EndedAt = ended, DurationSeconds = Math.Max(0, (ended - started).TotalSeconds),
@@ -55,7 +56,8 @@ internal sealed class RunRecord
         GeneratedTokens = stats.GeneratedTokens, PromptTokens = stats.PromptTokens,
         OffloadedLayers = stats.OffloadedLayers, TotalLayers = stats.TotalLayers,
         GpuTotalMiB = stats.GpuTotalMiB, GpuFreeMiB = stats.GpuFreeMiB, GpuModelMiB = stats.GpuModelMiB,
-        GpuContextMiB = stats.GpuContextMiB, GpuComputeMiB = stats.GpuComputeMiB, Issues = [.. stats.Issues]
+        GpuContextMiB = stats.GpuContextMiB, GpuComputeMiB = stats.GpuComputeMiB, Issues = [.. stats.Issues],
+        ResourceSamples = resourceSamples is null ? [] : [.. resourceSamples]
     };
 }
 
