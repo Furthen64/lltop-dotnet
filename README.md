@@ -13,7 +13,7 @@ A .NET 10 + Terminal.Gui v2 control center for llama.cpp's `llama-server`.
 - Persist a timestamped log for each run.
 - Persist JSON run history with per-profile performance summaries, sparklines, editable notes, and two-second resource samples.
 - Press `g` on a selected profile to replace the runtime log with an ASCII graph of the latest run's VRAM and system-RAM use, including sampled peaks after a crash.
-- Write a live, tab-separated `run-<datetime>-<profile>.dat` graph source beside run records. It includes resource samples and labels for prompts, request completion, errors, server readiness, and "all slots idle" messages.
+- Write a live, tab-separated `run-<datetime>-<profile>.dat` graph source beside run records. It includes resource samples plus structured llama.cpp cache, checkpoint, request, and idle events.
 - Warn before repeating a recently failed startup configuration.
 - Detect externally started `llama-server` processes and follow their logs when available.
 - Copy launch commands, toggle log autoscroll, and inspect history from the keyboard.
@@ -57,8 +57,15 @@ python3 tools/realtime_graph.py ~/.config/lltop/runs/run-20260826-120000-qwen.da
 For example, show only VRAM and GPU use while annotating idle and error events:
 
 ```sh
-python3 tools/realtime_graph.py run-*.dat --metrics vram,gpu --events all_slots_idle,error
+python3 tools/realtime_graph.py run-*.dat --metrics vram,gpu --events slots_idle,error
 ```
+
+The `.dat` format is tab-separated and has `sample`, `event`, and `telemetry`
+rows sharing UTC timestamps. Event rows carry an `event` name, JSON object of
+parsed fields, and the raw llama.cpp line. This preserves events such as
+`prompt_cache_evict`, `checkpoint_create`, `checkpoint_erase`,
+`full_prompt_reprocess`, `request_start`, `request_end`, and `slots_idle` for
+external plotting without depending on one llama.cpp log format.
 
 ## Benchmark sweeps
 

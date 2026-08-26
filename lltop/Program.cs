@@ -65,7 +65,8 @@ LltopTheme.Apply([profileFrame, logFrame, statusFrame], banner, profileList, log
 ISystemResourceProvider resourceProvider = OperatingSystem.IsLinux()
     ? new LinuxSystemResourceProvider(
         () => (resourceGpuBackend, resourceGpuName),
-        () => runner.State == RunnerState.Running || externalServer is not null || benchmarkActive ? 1 : 0)
+        () => runner.State == RunnerState.Running || externalServer is not null || benchmarkActive ? 1 : 0,
+        serverProcessId: () => runner.ProcessId)
     : new UnavailableSystemResourceProvider(() => runner.State == RunnerState.Running || externalServer is not null || benchmarkActive ? 1 : 0);
 var benchmarkRunner = new BenchmarkRunner(
     cfg,
@@ -363,7 +364,7 @@ void SaveActiveRun(ServerExit exit)
     {
         lock (activeRunGate)
         {
-            activeRunGraphData?.WriteEvent(ended, "run_ended", exit.Requested ? $"Run stopped (exit {exit.ExitCode})" : $"Run exited (code {exit.ExitCode})");
+            activeRunGraphData?.WriteEvent(ended, new LlamaRuntimeEvent("run_ended", new Dictionary<string, object?> { ["exit_code"] = exit.ExitCode, ["requested"] = exit.Requested }, ""));
             activeRunGraphData?.Dispose();
             activeRunGraphData = null;
         }
@@ -624,8 +625,11 @@ runner.LineReceived += line => app.Invoke(() =>
     serverStats.Consume(line, runner.StartedAt);
     lock (activeRunGate)
     {
-        var graphEvent = RunGraphEvents.FromLogLine(line);
-        if (graphEvent is { } item) activeRunGraphData?.WriteEvent(DateTimeOffset.Now, item.Kind, item.Label);
+        var timestamp = DateTimeOffset.Now;
+        var graphEvent = LlamaRuntimeEventParser.Parse(line);
+        if (graphEvent is not null) activeRunGraphData?.WriteEvent(timestamp, graphEvent);
+        var telemetry = LlamaRuntimeEventParser.ParseGenerationTelemetry(line);
+        if (telemetry is not null) activeRunGraphData?.WriteTelemetry(timestamp, telemetry, line);
     }
     logLines.Add(line);
     if (logLines.Count > 500) logLines.RemoveAt(0);

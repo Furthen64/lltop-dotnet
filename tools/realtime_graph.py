@@ -23,11 +23,11 @@ def read_source(path):
                 stamp = datetime.fromisoformat(row["timestamp_utc"].replace("Z", "+00:00"))
             except (KeyError, ValueError):
                 continue  # ignore a partially-written final line while following
-            if row["kind"] == "sample":
+            if row["type"] == "sample":
                 samples.append((stamp, {key: number(row.get(key, "")) for key in (
                     "cpu_percent", "gpu_percent", "system_ram_used_bytes", "vram_used_bytes")}))
-            elif row.get("label"):
-                events.append((stamp, row["kind"], row["label"]))
+            elif row["type"] == "event" and row.get("event"):
+                events.append((stamp, row["event"], row["event"]))
     return samples, events
 
 

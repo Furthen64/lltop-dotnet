@@ -6,7 +6,15 @@ internal sealed record RunResourceSample
     public DateTimeOffset Timestamp { get; init; }
     public double? CpuUsagePercent { get; init; }
     public long? SystemRamUsedBytes { get; init; }
+    public long? SystemRamAvailableBytes { get; init; }
     public long? SystemRamTotalBytes { get; init; }
+    public long? SwapUsedBytes { get; init; }
+    public long? SwapFreeBytes { get; init; }
+    public long? LlamaRssBytes { get; init; }
+    public long? LlamaPssBytes { get; init; }
+    public long? LlamaPrivateDirtyBytes { get; init; }
+    public long? LlamaAnonymousBytes { get; init; }
+    public long? LlamaSwapBytes { get; init; }
     public double? GpuUsagePercent { get; init; }
     public long? VramUsedBytes { get; init; }
     public long? VramTotalBytes { get; init; }
@@ -16,7 +24,15 @@ internal sealed record RunResourceSample
         Timestamp = snapshot.Timestamp,
         CpuUsagePercent = snapshot.CpuUsagePercent,
         SystemRamUsedBytes = snapshot.SystemRamUsedBytes,
+        SystemRamAvailableBytes = snapshot.SystemRamAvailableBytes,
         SystemRamTotalBytes = snapshot.SystemRamTotalBytes,
+        SwapUsedBytes = snapshot.SwapUsedBytes,
+        SwapFreeBytes = snapshot.SwapFreeBytes,
+        LlamaRssBytes = snapshot.LlamaRssBytes,
+        LlamaPssBytes = snapshot.LlamaPssBytes,
+        LlamaPrivateDirtyBytes = snapshot.LlamaPrivateDirtyBytes,
+        LlamaAnonymousBytes = snapshot.LlamaAnonymousBytes,
+        LlamaSwapBytes = snapshot.LlamaSwapBytes,
         GpuUsagePercent = snapshot.GpuUsagePercent,
         VramUsedBytes = snapshot.VramUsedBytes,
         VramTotalBytes = snapshot.VramTotalBytes

@@ -6,7 +6,15 @@ internal sealed record SystemResourceSnapshot
 {
     public double? CpuUsagePercent { get; init; }
     public long? SystemRamUsedBytes { get; init; }
+    public long? SystemRamAvailableBytes { get; init; }
     public long? SystemRamTotalBytes { get; init; }
+    public long? SwapUsedBytes { get; init; }
+    public long? SwapFreeBytes { get; init; }
+    public long? LlamaRssBytes { get; init; }
+    public long? LlamaPssBytes { get; init; }
+    public long? LlamaPrivateDirtyBytes { get; init; }
+    public long? LlamaAnonymousBytes { get; init; }
+    public long? LlamaSwapBytes { get; init; }
     public double? GpuUsagePercent { get; init; }
     public long? VramUsedBytes { get; init; }
     public long? VramTotalBytes { get; init; }
@@ -27,6 +35,7 @@ internal sealed class LinuxSystemResourceProvider : ISystemResourceProvider
 {
     private readonly Func<(string Backend, string Name)> gpuDescription;
     private readonly Func<int> runningServerCount;
+    private readonly Func<int?> serverProcessId;
     private readonly Func<CancellationToken, Task<GpuResourceMetrics?>> readGpuMetricsAsync;
     private readonly object cpuGate = new();
     private CpuTimes? previousCpuTimes;
@@ -34,16 +43,18 @@ internal sealed class LinuxSystemResourceProvider : ISystemResourceProvider
     public LinuxSystemResourceProvider(
         Func<(string Backend, string Name)> gpuDescription,
         Func<int> runningServerCount,
-        Func<CancellationToken, Task<GpuResourceMetrics?>>? readGpuMetricsAsync = null)
+        Func<CancellationToken, Task<GpuResourceMetrics?>>? readGpuMetricsAsync = null,
+        Func<int?>? serverProcessId = null)
     {
         this.gpuDescription = gpuDescription;
         this.runningServerCount = runningServerCount;
         this.readGpuMetricsAsync = readGpuMetricsAsync ?? ReadGpuMetricsAsync;
+        this.serverProcessId = serverProcessId ?? (() => null);
     }
 
     public async Task<SystemResourceSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
-        var proc = await Task.Run(ReadProcSnapshot, cancellationToken);
+        var proc = await Task.Run(() => ReadProcSnapshot(serverProcessId()), cancellationToken);
         var description = gpuDescription();
         // Hardware telemetry must not depend on the selected server/profile probe.
         // That probe can still be pending (or unavailable) even when nvidia-smi works.
@@ -53,7 +64,15 @@ internal sealed class LinuxSystemResourceProvider : ISystemResourceProvider
         {
             CpuUsagePercent = proc.CpuUsagePercent,
             SystemRamUsedBytes = proc.RamUsedBytes,
+            SystemRamAvailableBytes = proc.RamAvailableBytes,
             SystemRamTotalBytes = proc.RamTotalBytes,
+            SwapUsedBytes = proc.SwapUsedBytes,
+            SwapFreeBytes = proc.SwapFreeBytes,
+            LlamaRssBytes = proc.LlamaRssBytes,
+            LlamaPssBytes = proc.LlamaPssBytes,
+            LlamaPrivateDirtyBytes = proc.LlamaPrivateDirtyBytes,
+            LlamaAnonymousBytes = proc.LlamaAnonymousBytes,
+            LlamaSwapBytes = proc.LlamaSwapBytes,
             GpuUsagePercent = gpu?.UsagePercent,
             VramUsedBytes = gpu?.VramUsedBytes,
             VramTotalBytes = gpu?.VramTotalBytes,
@@ -63,7 +82,7 @@ internal sealed class LinuxSystemResourceProvider : ISystemResourceProvider
         };
     }
 
-    private (double? CpuUsagePercent, long? RamUsedBytes, long? RamTotalBytes) ReadProcSnapshot()
+    private (double? CpuUsagePercent, long? RamUsedBytes, long? RamAvailableBytes, long? RamTotalBytes, long? SwapUsedBytes, long? SwapFreeBytes, long? LlamaRssBytes, long? LlamaPssBytes, long? LlamaPrivateDirtyBytes, long? LlamaAnonymousBytes, long? LlamaSwapBytes) ReadProcSnapshot(int? processId)
     {
         double? cpuPercent = null;
         var currentCpu = ParseCpuTimes(File.ReadLines("/proc/stat").FirstOrDefault() ?? "");
@@ -77,17 +96,30 @@ internal sealed class LinuxSystemResourceProvider : ISystemResourceProvider
             }
         }
 
-        long? total = null;
-        long? available = null;
+        long? total = null, available = null, swapTotal = null, swapFree = null;
         foreach (var line in File.ReadLines("/proc/meminfo"))
         {
             if (line.StartsWith("MemTotal:", StringComparison.Ordinal)) total = ParseMemInfoBytes(line);
             else if (line.StartsWith("MemAvailable:", StringComparison.Ordinal)) available = ParseMemInfoBytes(line);
-            if (total.HasValue && available.HasValue) break;
+            else if (line.StartsWith("SwapTotal:", StringComparison.Ordinal)) swapTotal = ParseMemInfoBytes(line);
+            else if (line.StartsWith("SwapFree:", StringComparison.Ordinal)) swapFree = ParseMemInfoBytes(line);
         }
 
         long? used = total.HasValue && available.HasValue ? Math.Max(0, total.Value - available.Value) : null;
-        return (cpuPercent, used, total);
+        var llama = ReadProcessMetrics(processId);
+        return (cpuPercent, used, available, total, swapTotal.HasValue && swapFree.HasValue ? Math.Max(0, swapTotal.Value - swapFree.Value) : null, swapFree, llama.Rss, llama.Pss, llama.PrivateDirty, llama.Anonymous, llama.Swap);
+    }
+
+    static (long? Rss, long? Pss, long? PrivateDirty, long? Anonymous, long? Swap) ReadProcessMetrics(int? processId)
+    {
+        if (processId is not > 0) return default;
+        try
+        {
+            var root = $"/proc/{processId.Value}";
+            long? Read(string file, string key) => File.ReadLines(file).FirstOrDefault(x => x.StartsWith(key, StringComparison.Ordinal)) is { } line ? ParseMemInfoBytes(line) : null;
+            return (Read($"{root}/status", "VmRSS:"), Read($"{root}/smaps_rollup", "Pss:"), Read($"{root}/smaps_rollup", "Private_Dirty:"), Read($"{root}/smaps_rollup", "Anonymous:"), Read($"{root}/status", "VmSwap:"));
+        }
+        catch { return default; }
     }
 
     internal static CpuTimes? ParseCpuTimes(string line)
