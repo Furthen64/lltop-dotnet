@@ -809,7 +809,7 @@ static bool EditProfile(IApplication app, Profile profile, string title)
     Field("Presence penalty", profile.PresencePenalty.ToString(CultureInfo.InvariantCulture), 37); Field("Frequency penalty", profile.FrequencyPenalty.ToString(CultureInfo.InvariantCulture), 37, 49);
     Field("Batch", profile.Batch.ToString(), 40); Field("Micro batch", profile.UBatch.ToString(), 40, 49);
     Field("Chat template", profile.ChatTemplate, 43); Field("Reasoning / budget", $"{profile.Reasoning} {profile.ReasoningBudget}", 43, 49);
-    Field("Image min tokens (0 = default)", profile.ImageMinTokens.ToString(), 46);
+    Field("Image min tokens (0 = default)", profile.ImageMinTokens.ToString(), 46); Field("Context checkpoints", profile.CtxCheckpoints.ToString(), 46, 49);
     Field("Extra args (quoted when needed)", ArgumentText.Format(profile.ExtraArgs), 49, 2, 90);
     var vision = new CheckBox { X = 2, Y = 52, Text = "Use vision", Value = profile.Vision ? CheckState.Checked : CheckState.UnChecked };
     var jinja = new CheckBox { X = 20, Y = 52, Text = "Jinja", Value = profile.Jinja ? CheckState.Checked : CheckState.UnChecked };
@@ -853,6 +853,7 @@ static bool EditProfile(IApplication app, Profile profile, string title)
             profile.PresencePenalty = ParseDouble(T("Presence penalty"), "Presence penalty"); profile.FrequencyPenalty = ParseDouble(T("Frequency penalty"), "Frequency penalty");
             profile.Batch = ParseInt(T("Batch"), "Batch"); profile.UBatch = ParseInt(T("Micro batch"), "Micro batch");
             profile.ImageMinTokens = ParseInt(T("Image min tokens (0 = default)"), "Image minimum tokens");
+            profile.CtxCheckpoints = ParseInt(T("Context checkpoints"), "Context checkpoints");
             profile.ChatTemplate = T("Chat template").Trim();
             var reasoning = T("Reasoning / budget").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             profile.Reasoning = reasoning.FirstOrDefault() ?? "auto"; profile.ReasoningBudget = reasoning.Length > 1 ? ParseInt(reasoning[1], "Reasoning budget") : -1;

@@ -215,7 +215,7 @@ static class ServerCapabilityParser
         ["-ngl"] = true, ["--cache-type-k"] = true, ["--cache-type-v"] = true, ["--flash-attn"] = true, ["-fa"] = true,
         ["--temp"] = true, ["--top-p"] = true, ["--top-k"] = true, ["--min-p"] = true, ["-b"] = true, ["-ub"] = true,
         ["--parallel"] = true, ["--threads"] = true, ["--chat-template"] = true, ["--reasoning"] = true,
-        ["--reasoning-budget"] = true, ["--threads-http"] = true, ["--device"] = true, ["--main-gpu"] = true,
+        ["--ctx-checkpoints"] = true, ["--reasoning-budget"] = true, ["--threads-http"] = true, ["--device"] = true, ["--main-gpu"] = true,
         ["-mg"] = true, ["--split-mode"] = true, ["-sm"] = true, ["--tensor-split"] = true, ["-ts"] = true,
         ["--metrics"] = false, ["--jinja"] = false, ["--no-mmap"] = false, ["--verbose"] = false
     };

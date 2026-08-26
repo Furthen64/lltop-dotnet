@@ -28,6 +28,7 @@ sealed class Profile
     public int Batch { get; set; } = 512;
     public int UBatch { get; set; } = 256;
     public int Parallel { get; set; } = 1;
+    public int CtxCheckpoints { get; set; } = 4;
     public int Threads { get; set; }
     public string FlashAttn { get; set; } = "auto";
     public bool Jinja { get; set; } = true;
@@ -55,7 +56,7 @@ sealed class Profile
         CacheK = CacheK, CacheV = CacheV, Temp = Temp, TopP = TopP, TopK = TopK,
         MinP = MinP, RepeatPenalty = RepeatPenalty, RepeatLastN = RepeatLastN,
         PresencePenalty = PresencePenalty, FrequencyPenalty = FrequencyPenalty,
-        Batch = Batch, UBatch = UBatch, Parallel = Parallel, Threads = Threads,
+        Batch = Batch, UBatch = UBatch, Parallel = Parallel, CtxCheckpoints = CtxCheckpoints, Threads = Threads,
         FlashAttn = FlashAttn, Jinja = Jinja, Metrics = Metrics, NoMmap = NoMmap,
         ChatTemplate = ChatTemplate, Reasoning = Reasoning, ReasoningBudget = ReasoningBudget,
         ExtraArgs = [.. ExtraArgs], SourcePath = SourcePath
@@ -91,6 +92,7 @@ sealed class Profile
         if (Vision && !File.Exists(Mmproj)) throw new FileNotFoundException("Vision projector was not found.", Mmproj);
         if (Ctx <= 0 || Batch <= 0 || UBatch <= 0 || Parallel <= 0)
             throw new InvalidOperationException("Context, batch, micro-batch, and parallel values must be greater than zero.");
+        if (CtxCheckpoints <= 0) throw new InvalidOperationException("Context checkpoints must be greater than zero.");
         if (Ngl < 0) throw new InvalidOperationException("GPU layers cannot be negative.");
     }
 }
@@ -179,7 +181,7 @@ sealed class ProfileStore(string directory)
         D("temp", p.Temp); D("top_p", p.TopP); I("top_k", p.TopK); D("min_p", p.MinP);
         D("repeat_penalty", p.RepeatPenalty); I("repeat_last_n", p.RepeatLastN);
         D("presence_penalty", p.PresencePenalty); D("frequency_penalty", p.FrequencyPenalty);
-        I("batch", p.Batch); I("ubatch", p.UBatch); I("parallel", p.Parallel); I("threads", p.Threads);
+        I("batch", p.Batch); I("ubatch", p.UBatch); I("parallel", p.Parallel); I("ctx_checkpoints", p.CtxCheckpoints); I("threads", p.Threads);
         S("flash_attn", p.FlashAttn); B("jinja", p.Jinja); B("metrics", p.Metrics); B("no_mmap", p.NoMmap);
         S("chat_template", p.ChatTemplate); S("reasoning", p.Reasoning); I("reasoning_budget", p.ReasoningBudget);
         b.Append("extra_args = [").Append(string.Join(", ", p.ExtraArgs.Select(Toml.Quote))).AppendLine("]");

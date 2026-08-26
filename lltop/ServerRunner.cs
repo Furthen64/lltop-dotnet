@@ -209,6 +209,7 @@ sealed class ServerRunner : IDisposable
         segments.Add(new(["-b", p.Batch.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "batch"));
         segments.Add(new(["-ub", p.UBatch.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "micro batch"));
         segments.Add(new(["--parallel", p.Parallel.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "parallel"));
+        segments.Add(new(["--ctx-checkpoints", p.CtxCheckpoints.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "context checkpoints"));
         if (p.Threads > 0) segments.Add(new(["--threads", p.Threads.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "threads"));
         Flag("--metrics", p.Metrics, "metrics");
         Flag("--jinja", p.Jinja, "jinja");
