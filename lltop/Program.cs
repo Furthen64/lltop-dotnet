@@ -26,6 +26,7 @@ var serverStats = new ServerStats();
 var activeRunGate = new object();
 var logLines = new List<string>();
 var activeRunSamples = new List<RunResourceSample>();
+RunGraphDataWriter? activeRunGraphData = null;
 var profileItems = new ObservableCollection<string>();
 var historySummaries = new Dictionary<string, ProfileRunSummary>(StringComparer.OrdinalIgnoreCase);
 var closing = false;
@@ -353,7 +354,20 @@ void SaveActiveRun(ServerExit exit)
     if (runner.StartedAt is not { } started) return;
     List<RunResourceSample> samples;
     lock (activeRunGate) samples = [.. activeRunSamples];
-    RunHistory.Save(cfg.RunsDir, RunRecord.Create(profile, runner.Command, started, DateTimeOffset.Now, exit.ExitCode, exit.Requested ? "stopped" : "exit", stats, runner.LogPath, samples));
+    var ended = DateTimeOffset.Now;
+    try
+    {
+        RunHistory.Save(cfg.RunsDir, RunRecord.Create(profile, runner.Command, started, ended, exit.ExitCode, exit.Requested ? "stopped" : "exit", stats, runner.LogPath, samples));
+    }
+    finally
+    {
+        lock (activeRunGate)
+        {
+            activeRunGraphData?.WriteEvent(ended, "run_ended", exit.Requested ? $"Run stopped (exit {exit.ExitCode})" : $"Run exited (code {exit.ExitCode})");
+            activeRunGraphData?.Dispose();
+            activeRunGraphData = null;
+        }
+    }
     historySummaries.Remove(profile.Name);
 }
 
@@ -463,10 +477,11 @@ async Task Launch(bool restart = false)
         lock (activeRunGate) { serverStats = new ServerStats(); activeProfile = profile.Copy(profile.Name); activeRunSamples.Clear(); }
         runningProfile = profile.Name;
         await runner.StartAsync(plan, profile, cfg);
+        lock (activeRunGate) activeRunGraphData = RunGraphDataWriter.Create(cfg.RunsDir, profile, runner.StartedAt ?? DateTimeOffset.Now);
         RefreshProfileItems(profile.Name);
         UpdateStatus(plan.RemovedArguments.Count == 0
-            ? $"Started successfully. Log: {runner.LogPath}"
-            : $"Started with compatibility filtering. Removed: {string.Join(", ", plan.RemovedArguments.Select(x => x.OptionName).Distinct(StringComparer.Ordinal))}. Log: {runner.LogPath}");
+            ? $"Started successfully. Log: {runner.LogPath}  Graph data: {activeRunGraphData.Path}"
+            : $"Started with compatibility filtering. Removed: {string.Join(", ", plan.RemovedArguments.Select(x => x.OptionName).Distinct(StringComparer.Ordinal))}. Graph data: {activeRunGraphData.Path}");
     }
     catch (Exception ex)
     {
@@ -607,6 +622,11 @@ async Task Quit()
 runner.LineReceived += line => app.Invoke(() =>
 {
     serverStats.Consume(line, runner.StartedAt);
+    lock (activeRunGate)
+    {
+        var graphEvent = RunGraphEvents.FromLogLine(line);
+        if (graphEvent is { } item) activeRunGraphData?.WriteEvent(DateTimeOffset.Now, item.Kind, item.Label);
+    }
     logLines.Add(line);
     if (logLines.Count > 500) logLines.RemoveAt(0);
     RefreshLogs(); UpdateStatus();
@@ -759,7 +779,9 @@ _ = Task.Run(async () =>
                 {
                     if (runner.IsActive && activeProfile is not null)
                     {
-                        activeRunSamples.Add(RunResourceSample.From(snapshot));
+                        var sample = RunResourceSample.From(snapshot);
+                        activeRunSamples.Add(sample);
+                        activeRunGraphData?.WriteSample(sample);
                         if (activeRunSamples.Count > 1800) activeRunSamples.RemoveAt(0);
                     }
                 }

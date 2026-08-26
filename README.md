@@ -13,6 +13,7 @@ A .NET 10 + Terminal.Gui v2 control center for llama.cpp's `llama-server`.
 - Persist a timestamped log for each run.
 - Persist JSON run history with per-profile performance summaries, sparklines, editable notes, and two-second resource samples.
 - Press `g` on a selected profile to replace the runtime log with an ASCII graph of the latest run's VRAM and system-RAM use, including sampled peaks after a crash.
+- Write a live, tab-separated `run-<datetime>-<profile>.dat` graph source beside run records. It includes resource samples and labels for prompts, request completion, errors, server readiness, and "all slots idle" messages.
 - Warn before repeating a recently failed startup configuration.
 - Detect externally started `llama-server` processes and follow their logs when available.
 - Copy launch commands, toggle log autoscroll, and inspect history from the keyboard.
@@ -40,6 +41,24 @@ selected profile, `H` for run history and notes, `g` for its resource graph, `c`
 and `l` to toggle log autoscroll. Profiles
 are stored under `~/.config/lltop/profiles` and run records under
 `~/.config/lltop/runs` by default.
+
+## Live graph viewer
+
+Each managed run also creates an append-only `run-*.dat` file in `runs_dir`.
+It can be read while the server is running. The included viewer uses Matplotlib's
+native toolbar for pan and zoom, can filter metrics and event labels, and can
+follow the live file:
+
+```sh
+python3 -m pip install matplotlib
+python3 tools/realtime_graph.py ~/.config/lltop/runs/run-20260826-120000-qwen.dat --follow
+```
+
+For example, show only VRAM and GPU use while annotating idle and error events:
+
+```sh
+python3 tools/realtime_graph.py run-*.dat --metrics vram,gpu --events all_slots_idle,error
+```
 
 ## Benchmark sweeps
 
