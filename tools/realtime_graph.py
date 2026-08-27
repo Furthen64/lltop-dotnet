@@ -40,6 +40,7 @@ def main():
     args = parser.parse_args()
     metrics = {item.strip() for item in args.metrics.split(",")}
     wanted_events = None if args.events == "all" else set() if args.events == "none" else set(args.events.split(","))
+    plt.style.use("dark_background")
     fig, (memory, utilization) = plt.subplots(2, 1, sharex=True, layout="constrained")
     fig.canvas.manager.set_window_title("lltop realtime graph")
 
@@ -53,21 +54,30 @@ def main():
             if "ram" in metrics: memory.plot(times, [sample[1]["system_ram_used_bytes"] / 2**30 if sample[1]["system_ram_used_bytes"] is not None else None for sample in samples], label="System RAM (GiB)")
             if "cpu" in metrics: utilization.plot(times, [sample[1]["cpu_percent"] for sample in samples], label="CPU (%)")
             if "gpu" in metrics: utilization.plot(times, [sample[1]["gpu_percent"] for sample in samples], label="GPU (%)")
-        for stamp, kind, label in events:
-            if wanted_events is not None and kind not in wanted_events:
-                continue
+        visible_events = [(stamp, kind, label) for stamp, kind, label in events
+                          if wanted_events is None or kind in wanted_events]
+        for index, (stamp, kind, label) in enumerate(visible_events):
             for axis in (memory, utilization):
                 axis.axvline(stamp, color="tab:red" if kind == "error" else "0.5", alpha=.35, linewidth=.8)
-            memory.annotate(label, (stamp, 1), xycoords=("data", "axes fraction"), xytext=(3, -3), textcoords="offset points", rotation=90, va="top", fontsize=8)
+            memory.annotate(label.replace("_", " "), (stamp, 1), xycoords=("data", "axes fraction"),
+                            xytext=(4, -5 - (index % 3) * 14), textcoords="offset points",
+                            ha="left", va="top", fontsize=7,
+                            bbox={"boxstyle": "round,pad=0.15", "fc": "#202020", "ec": "none", "alpha": .8})
         memory.set_ylabel("Memory (GiB)"); utilization.set_ylabel("Utilization (%)")
         utilization.set_xlabel("Time (toolbar: pan/zoom)")
+        for axis in (memory, utilization):
+            axis.set_axisbelow(True)
+            axis.grid(True, which="major", color="#8a8a8a", alpha=.22, linewidth=.6)
         memory.legend(loc="upper left"); utilization.legend(loc="upper left")
         utilization.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
         if left is not None and not args.follow: plt.xlim(left, right)
 
     draw()
+    animation = None
     if args.follow:
-        FuncAnimation(fig, draw, interval=1000, cache_frame_data=False)
+        # Keep a reference alive for the lifetime of the window.  Without it,
+        # FuncAnimation is garbage-collected and the graph stops refreshing.
+        animation = FuncAnimation(fig, draw, interval=1000, cache_frame_data=False)
     plt.show()
 
 

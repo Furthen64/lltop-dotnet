@@ -209,9 +209,14 @@ void RefreshLogs()
             catch { }
         }
         List<RunResourceSample> samples;
-        lock (activeRunGate) samples = live ? [.. activeRunSamples] : latest?.ResourceSamples ?? [];
+        string? graphDataPath;
+        lock (activeRunGate)
+        {
+            samples = live ? [.. activeRunSamples] : latest?.ResourceSamples ?? [];
+            graphDataPath = live ? activeRunGraphData?.Path : latest?.GraphDataPath;
+        }
         logFrame.Title = " Resource graph ";
-        logView.Text = profile is null ? "No profile selected." : RunResourceGraph.Format(profile.Name, latest, samples, logView.Viewport.Width, live);
+        logView.Text = profile is null ? "No profile selected." : RunResourceGraph.Format(profile.Name, latest, samples, logView.Viewport.Width, live, graphDataPath);
         logView.MoveHome();
         logStatus.Text = live ? "GRAPH  live resource samples · [g] runtime log" : "GRAPH  latest recorded run · [g] runtime log";
         return;
@@ -354,11 +359,16 @@ void SaveActiveRun(ServerExit exit)
     }
     if (runner.StartedAt is not { } started) return;
     List<RunResourceSample> samples;
-    lock (activeRunGate) samples = [.. activeRunSamples];
+    string graphDataPath;
+    lock (activeRunGate)
+    {
+        samples = [.. activeRunSamples];
+        graphDataPath = activeRunGraphData?.Path ?? "";
+    }
     var ended = DateTimeOffset.Now;
     try
     {
-        RunHistory.Save(cfg.RunsDir, RunRecord.Create(profile, runner.Command, started, ended, exit.ExitCode, exit.Requested ? "stopped" : "exit", stats, runner.LogPath, samples));
+        RunHistory.Save(cfg.RunsDir, RunRecord.Create(profile, runner.Command, started, ended, exit.ExitCode, exit.Requested ? "stopped" : "exit", stats, runner.LogPath, samples, graphDataPath));
     }
     finally
     {

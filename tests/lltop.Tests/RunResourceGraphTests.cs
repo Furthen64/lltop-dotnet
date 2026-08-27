@@ -26,4 +26,15 @@ public sealed class RunResourceGraphTests
 
         Assert.Contains("No resource samples", graph);
     }
+
+    [Fact]
+    public void ShowsGraphDataPath()
+    {
+        var started = DateTimeOffset.Now;
+        var samples = new[] { new RunResourceSample { Timestamp = started, VramUsedBytes = 8, VramTotalBytes = 16 } };
+
+        var graph = RunResourceGraph.Format("qwen", null, samples, 80, live: true, dataPath: "/runs/run-qwen.dat");
+
+        Assert.Contains("Data file: /runs/run-qwen.dat", graph);
+    }
 }

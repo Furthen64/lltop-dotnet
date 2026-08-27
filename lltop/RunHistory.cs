@@ -19,6 +19,7 @@ internal sealed class RunRecord
     [JsonPropertyName("exit_reason")] public string ExitReason { get; set; } = "";
     [JsonPropertyName("generated_command")] public string GeneratedCommand { get; set; } = "";
     [JsonPropertyName("log_path")] public string LogPath { get; set; } = "";
+    [JsonPropertyName("graph_data_path")] public string GraphDataPath { get; set; } = "";
     [JsonPropertyName("model")] public string Model { get; set; } = "";
     [JsonPropertyName("ctx")] public int Ctx { get; set; }
     [JsonPropertyName("ngl")] public int Ngl { get; set; }
@@ -45,11 +46,11 @@ internal sealed class RunRecord
     [JsonPropertyName("issues")] public List<RunIssue> Issues { get; set; } = [];
     [JsonPropertyName("resource_samples")] public List<RunResourceSample> ResourceSamples { get; set; } = [];
 
-    public static RunRecord Create(Profile p, string command, DateTimeOffset started, DateTimeOffset ended, int exitCode, string reason, ServerStats stats, string logPath = "", IEnumerable<RunResourceSample>? resourceSamples = null) => new()
+    public static RunRecord Create(Profile p, string command, DateTimeOffset started, DateTimeOffset ended, int exitCode, string reason, ServerStats stats, string logPath = "", IEnumerable<RunResourceSample>? resourceSamples = null, string graphDataPath = "") => new()
     {
         RunId = $"{started:yyyyMMdd_HHmmss}_{ProfileStore.Slugify(p.Name)}", ProfileName = p.Name,
         StartedAt = started, EndedAt = ended, DurationSeconds = Math.Max(0, (ended - started).TotalSeconds),
-        ExitCode = exitCode, ExitReason = reason, GeneratedCommand = command, LogPath = logPath,
+        ExitCode = exitCode, ExitReason = reason, GeneratedCommand = command, LogPath = logPath, GraphDataPath = graphDataPath,
         Model = p.Model, Ctx = p.Ctx, Ngl = p.Ngl, CacheK = p.CacheK, CacheV = p.CacheV, Batch = p.Batch, UBatch = p.UBatch,
         Parallel = p.Parallel, Reasoning = p.Reasoning, ReasoningBudget = p.ReasoningBudget, NoMmap = p.NoMmap, ExtraArgs = [.. p.ExtraArgs],
         PromptTokensPerSecond = stats.PromptTokensPerSecond, EvalTokensPerSecond = stats.EvalTokensPerSecond,

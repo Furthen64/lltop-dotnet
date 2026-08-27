@@ -43,12 +43,15 @@ internal static class RunResourceGraph
 {
     private const int Height = 10;
 
-    internal static string Format(string profileName, RunRecord? run, IReadOnlyList<RunResourceSample> samples, int availableWidth, bool live)
+    internal static string Format(string profileName, RunRecord? run, IReadOnlyList<RunResourceSample> samples, int availableWidth, bool live, string? dataPath = null)
     {
         if (samples.Count == 0)
-            return live
+        {
+            var message = live
                 ? $"Resource graph · {profileName}\n\nWaiting for the first resource sample…"
                 : $"Resource graph · {profileName}\n\nNo resource samples were saved for the latest run.\nOnly runs started after this feature was added contain graphs.";
+            return string.IsNullOrWhiteSpace(dataPath) ? message : $"{message}\n\nData file: {dataPath}";
+        }
 
         var width = Math.Clamp(availableWidth - 13, 12, 100);
         var started = run?.StartedAt ?? samples[0].Timestamp;
@@ -59,6 +62,7 @@ internal static class RunResourceGraph
         {
             $"Resource graph · {profileName} · {title}",
             $"{samples.Count} samples over {elapsed:F0}s  (each column is a point in time)",
+            string.IsNullOrWhiteSpace(dataPath) ? "" : $"Data file: {dataPath}",
             ""
         };
         AddChart(lines, "VRAM", samples, x => Percent(x.VramUsedBytes, x.VramTotalBytes), x => x.VramUsedBytes, x => x.VramTotalBytes, width);

@@ -71,5 +71,16 @@ public sealed class RunHistoryTests : IDisposable
         Assert.Equal(sample.SystemRamUsedBytes, run.ResourceSamples[0].SystemRamUsedBytes);
     }
 
+    [Fact]
+    public void SavesGraphDataPathWithRun()
+    {
+        var profile = new Profile { Name = "qwen", Model = "/m.gguf" };
+        var graphDataPath = Path.Combine(dir, "run-20260828-120000-qwen.dat");
+        RunHistory.Save(dir, RunRecord.Create(profile, "server", DateTimeOffset.Now.AddSeconds(-2), DateTimeOffset.Now, 0, "exit", new ServerStats(), graphDataPath: graphDataPath));
+
+        var run = Assert.Single(RunHistory.ForProfile(dir, profile.Name)).Record;
+        Assert.Equal(graphDataPath, run.GraphDataPath);
+    }
+
     public void Dispose() { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
 }
