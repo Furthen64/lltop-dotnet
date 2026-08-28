@@ -13,15 +13,53 @@ public sealed class UiTextTests
     }
 
     [Fact]
-    public void ProfileRow_PreservesMarkerVisionSuffixAndBothEndsOfName()
+    public void ProfileRows_PreservesMarkerVisionSuffixAndBothEndsOfNameWithoutTags()
     {
-        var row = UiText.ProfileRow("○", true, "diffusiongemma-26b-a4b-it-q4-k-m", "19.0G", 32);
+        var row = Assert.Single(UiText.ProfileRows([new UiText.ProfileRowData("○", true, "diffusiongemma-26b-a4b-it-q4-k-m", [], "19.0G")], 32));
 
         Assert.Equal(32, row.Length);
         Assert.StartsWith("○ [V] diff", row);
         Assert.Contains("…", row);
         Assert.Contains("q4-k-m", row);
         Assert.EndsWith("19.0G", row);
+    }
+
+    [Fact]
+    public void ProfileRows_AlignsTagColumnAcrossRowsWithDifferentVisionFlags()
+    {
+        var rows = UiText.ProfileRows([
+            new UiText.ProfileRowData("○", false, "alpha", ["fast"], "2.3G"),
+            new UiText.ProfileRowData("●", true, "beta", ["vision", "big model"], "21.3G")
+        ], 40);
+
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, r => Assert.Equal(40, r.Length));
+        Assert.Equal(rows[0].IndexOf("fast"), rows[1].IndexOf("vision"));
+        Assert.EndsWith("2.3G", rows[0]);
+        Assert.EndsWith("21.3G", rows[1]);
+    }
+
+    [Fact]
+    public void ProfileRows_TruncatesTagsBeforeTruncatingNames()
+    {
+        var rows = UiText.ProfileRows([
+            new UiText.ProfileRowData("○", false, "short-name", ["a-very-long-tag-that-will-not-fit-in-this-narrow-panel-at-all"], "2.3G")
+        ], 30);
+
+        var row = Assert.Single(rows);
+        Assert.StartsWith("○     short-name ", row);
+        Assert.Contains("…", row);
+        Assert.EndsWith("2.3G", row);
+    }
+
+    [Fact]
+    public void ProfileRows_KeepsFullTagsWhenTheyFit()
+    {
+        var row = Assert.Single(UiText.ProfileRows([new UiText.ProfileRowData("○", false, "alpha", ["fast", "coding"], "2.3G")], 50));
+
+        Assert.Equal(50, row.Length);
+        Assert.Contains("fast, coding", row);
+        Assert.DoesNotContain("…", row);
     }
 
     [Fact]

@@ -3,14 +3,43 @@ static class UiText
     public static string ProfileGlyph(bool isBroken, bool isRunning) =>
         isBroken ? "💥" : isRunning ? "●" : "○";
 
-    public static string ProfileRow(string marker, bool vision, string name, string size, int width)
+    public sealed record ProfileRowData(string Marker, bool Vision, string Name, IReadOnlyList<string> Tags, string Size);
+
+    // Columns: glyph · [V] slot · profile name · tags · image size. The [V] slot and the
+    // name column keep a fixed width so tags line up across rows; tags truncate before names do.
+    public static List<string> ProfileRows(IEnumerable<ProfileRowData> source, int width)
     {
-        var prefix = marker + (vision ? " [V] " : " ");
-        var suffix = string.IsNullOrWhiteSpace(size) ? "" : $"  {size}";
-        var available = Math.Max(1, width - prefix.Length - suffix.Length);
-        if (prefix.Length + suffix.Length >= width)
-            return MiddleEllipsize(prefix + name + suffix, width);
-        return prefix + MiddleEllipsize(name, available).PadRight(available) + suffix;
+        var lines = new List<string>();
+        width = Math.Max(12, width);
+        var parts = source.Select(r =>
+        {
+            var prefix = r.Marker + " " + (r.Vision ? "[V] " : "    ");
+            var suffix = string.IsNullOrWhiteSpace(r.Size) ? "" : $" {r.Size}";
+            return (R: r, Prefix: prefix, Suffix: suffix, Avail: Math.Max(1, width - prefix.Length - suffix.Length));
+        }).ToList();
+        if (parts.Count == 0) return lines;
+        var hasTags = parts.Any(p => p.R.Tags.Any(t => !string.IsNullOrWhiteSpace(t)));
+        var nameWidth = hasTags
+            ? Math.Clamp(parts.Max(p => MiddleEllipsize(p.R.Name, p.Avail).Length), 0, Math.Max(0, parts.Min(p => p.Avail) - 1))
+            : 0;
+        foreach (var part in parts)
+        {
+            if (part.Prefix.Length + part.Suffix.Length >= width)
+            {
+                lines.Add(MiddleEllipsize(part.Prefix + part.R.Name + part.Suffix, width));
+                continue;
+            }
+            if (!hasTags)
+            {
+                lines.Add(part.Prefix + MiddleEllipsize(part.R.Name, part.Avail).PadRight(part.Avail) + part.Suffix);
+                continue;
+            }
+            var tagText = string.Join(", ", part.R.Tags.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()));
+            var middle = MiddleEllipsize(part.R.Name, nameWidth).PadRight(nameWidth);
+            if (tagText.Length > 0) middle += " " + MiddleEllipsize(tagText, Math.Max(0, part.Avail - nameWidth - 1));
+            lines.Add(part.Prefix + middle.PadRight(part.Avail) + part.Suffix);
+        }
+        return lines;
     }
 
     public static string MiddleEllipsize(string value, int width)

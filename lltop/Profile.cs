@@ -5,6 +5,7 @@ sealed class Profile
 {
     public string Name { get; set; } = "";
     public string Description { get; set; } = "";
+    public List<string> Tags { get; set; } = [];
     public string LlamaServer { get; set; } = "";
     public string Model { get; set; } = "";
     public bool Vision { get; set; }
@@ -50,7 +51,7 @@ sealed class Profile
 
     public Profile Copy(string name) => new()
     {
-        Name = name, Description = Description, LlamaServer = LlamaServer, Model = Model,
+        Name = name, Description = Description, Tags = [.. Tags], LlamaServer = LlamaServer, Model = Model,
         Vision = Vision, Mmproj = Mmproj, ImageMinTokens = ImageMinTokens,
         Host = Host, Port = Port, Alias = Alias, Ctx = Ctx, Ngl = Ngl,
         CacheK = CacheK, CacheV = CacheV, Temp = Temp, TopP = TopP, TopK = TopK,
@@ -174,6 +175,7 @@ sealed class ProfileStore(string directory)
         void D(string key, double value) => b.Append(key).Append(" = ").AppendLine(value.ToString("0.###", CultureInfo.InvariantCulture));
         void B(string key, bool value) => b.Append(key).Append(" = ").AppendLine(value ? "true" : "false");
         S("name", p.Name); S("description", p.Description);
+        b.Append("tags = [").Append(string.Join(", ", p.Tags.Select(Toml.Quote))).AppendLine("]");
         if (!string.IsNullOrWhiteSpace(p.LlamaServer)) S("llama_server", p.LlamaServer);
         S("model", p.Model); B("vision", p.Vision); S("mmproj", p.Mmproj); I("image_min_tokens", p.ImageMinTokens);
         S("host", p.Host); I("port", p.Port); S("alias", p.Alias);

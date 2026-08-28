@@ -104,17 +104,21 @@ void RefreshProfileItems(string? selectName = null)
 {
     profileItems.Clear();
     if (profiles.Count == 0) profileItems.Add("  No profiles yet — press n to create one");
-    else foreach (var p in profiles)
+    else
     {
-        var summary = SummaryFor(p.Name);
-        // Error state deliberately wins: a profile with a known launch failure must
-        // remain visible as broken even if it is selected or a new launch is pending.
-        var marker = UiText.ProfileGlyph(
-            isBroken: !File.Exists(AppConfig.Expand(p.Model)) || summary?.LastExitCode is not null and not 0,
-            isRunning: p.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase) && runner.State == RunnerState.Running);
-        var size = CompactModelSize(p.Model);
+        var rows = new List<UiText.ProfileRowData>(profiles.Count);
+        foreach (var p in profiles)
+        {
+            var summary = SummaryFor(p.Name);
+            // Error state deliberately wins: a profile with a known launch failure must
+            // remain visible as broken even if it is selected or a new launch is pending.
+            var marker = UiText.ProfileGlyph(
+                isBroken: !File.Exists(AppConfig.Expand(p.Model)) || summary?.LastExitCode is not null and not 0,
+                isRunning: p.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase) && runner.State == RunnerState.Running);
+            rows.Add(new UiText.ProfileRowData(marker, p.Vision, p.Name, p.Tags, CompactModelSize(p.Model)));
+        }
         var width = Math.Max(12, profileFrame.Viewport.Width > 0 ? profileFrame.Viewport.Width - 3 : 32);
-        profileItems.Add(UiText.ProfileRow(marker, p.Vision, p.Name, size, width));
+        foreach (var line in UiText.ProfileRows(rows, width)) profileItems.Add(line);
     }
     profileList.SetSource(profileItems);
     if (profiles.Count == 0) { selected = 0; profileList.SelectedItem = 0; }
@@ -847,14 +851,15 @@ static bool EditProfile(IApplication app, Profile profile, string title)
     Field("Chat template", profile.ChatTemplate, 43); Field("Reasoning / budget", $"{profile.Reasoning} {profile.ReasoningBudget}", 43, 49);
     Field("Image min tokens (0 = default)", profile.ImageMinTokens.ToString(), 46); Field("Context checkpoints", profile.CtxCheckpoints.ToString(), 46, 49);
     Field("Extra args (quoted when needed)", ArgumentText.Format(profile.ExtraArgs), 49, 2, 90);
-    var vision = new CheckBox { X = 2, Y = 52, Text = "Use vision", Value = profile.Vision ? CheckState.Checked : CheckState.UnChecked };
-    var jinja = new CheckBox { X = 20, Y = 52, Text = "Jinja", Value = profile.Jinja ? CheckState.Checked : CheckState.UnChecked };
-    var metrics = new CheckBox { X = 36, Y = 52, Text = "Metrics", Value = profile.Metrics ? CheckState.Checked : CheckState.UnChecked };
-    var mmap = new CheckBox { X = 52, Y = 52, Text = "Disable mmap", Value = profile.NoMmap ? CheckState.Checked : CheckState.UnChecked };
+    Field("Tags (comma separated, shown in the profile list)", string.Join(", ", profile.Tags), 51, 2, 90);
+    var vision = new CheckBox { X = 2, Y = 53, Text = "Use vision", Value = profile.Vision ? CheckState.Checked : CheckState.UnChecked };
+    var jinja = new CheckBox { X = 20, Y = 53, Text = "Jinja", Value = profile.Jinja ? CheckState.Checked : CheckState.UnChecked };
+    var metrics = new CheckBox { X = 36, Y = 53, Text = "Metrics", Value = profile.Metrics ? CheckState.Checked : CheckState.UnChecked };
+    var mmap = new CheckBox { X = 52, Y = 53, Text = "Disable mmap", Value = profile.NoMmap ? CheckState.Checked : CheckState.UnChecked };
     dialog.Add(vision, jinja, metrics, mmap);
-    var message = new Label { X = 2, Y = 53, Width = 65, Text = "Vision: supported Qwen model + matching mmproj-BF16.gguf." };
-    var save = new Button { X = 68, Y = 53, Text = "Save", IsDefault = true };
-    var cancel = new Button { X = Pos.Right(save) + 1, Y = 53, Text = "Cancel" };
+    var message = new Label { X = 2, Y = 54, Width = 65, Text = "Vision: supported Qwen model + matching mmproj-BF16.gguf." };
+    var save = new Button { X = 68, Y = 54, Text = "Save", IsDefault = true };
+    var cancel = new Button { X = Pos.Right(save) + 1, Y = 54, Text = "Cancel" };
     dialog.Add(message, save, cancel);
     var accepted = false;
     findMmproj.Accepting += (_, _) =>
@@ -894,6 +899,7 @@ static bool EditProfile(IApplication app, Profile profile, string title)
             var reasoning = T("Reasoning / budget").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             profile.Reasoning = reasoning.FirstOrDefault() ?? "auto"; profile.ReasoningBudget = reasoning.Length > 1 ? ParseInt(reasoning[1], "Reasoning budget") : -1;
             profile.ExtraArgs = ArgumentText.Parse(T("Extra args (quoted when needed)"));
+            profile.Tags = T("Tags (comma separated, shown in the profile list)").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
             profile.Jinja = jinja.Value == CheckState.Checked; profile.Metrics = metrics.Value == CheckState.Checked; profile.NoMmap = mmap.Value == CheckState.Checked;
             profile.Validate(); accepted = true; app.RequestStop();
         }
