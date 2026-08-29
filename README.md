@@ -1,5 +1,8 @@
 # lltop-dotnet
 
+
+![Screenshot](media/screenshot.png)
+
 A .NET 10 + Terminal.Gui v2 control center for llama.cpp's `llama-server`.
 
 ## Current features
