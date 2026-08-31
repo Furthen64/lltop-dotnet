@@ -53,14 +53,17 @@ var profileList = new ListView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.
 var logView = new LogTextView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(1), ReadOnly = true, WordWrap = false, Text = "Waiting for a server launch…" };
 var logStatus = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Height = 1 };
 profileFrame.Add(profileList); logFrame.Add(logView, logStatus);
-var statusFrame = new FrameView { Title = " Selected profile / server ", X = 0, Y = Pos.Bottom(profileFrame), Width = Dim.Fill(), Height = 10 };
+var statusFrame = new FrameView { Title = " Selected profile / server ", X = 0, Y = Pos.Bottom(profileFrame), Width = Dim.Percent(34), Height = 10 };
 var status = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(), Text = "Loading…" };
 statusFrame.Add(status);
+var metricsFrame = new FrameView { Title = " Metrics ", X = Pos.Right(statusFrame), Y = Pos.Bottom(logFrame), Width = Dim.Fill(), Height = 10 };
+var metrics = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(), Text = "Waiting for the first request…" };
+metricsFrame.Add(metrics);
 var help = new Label { X = 1, Y = Pos.Bottom(statusFrame), Width = Dim.Fill(2), Height = 3,
     Text = "[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [p] Preview\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [h/?] All keys   [q] Quit" };
 var resourceStrip = new ResourceStripView { X = 1, Y = Pos.Bottom(help), Width = Dim.Fill(2) };
-win.Add(banner, profileFrame, logFrame, statusFrame, help, resourceStrip);
-LltopTheme.Apply([profileFrame, logFrame, statusFrame], banner, profileList, logView, status, help, logStatus);
+win.Add(banner, profileFrame, logFrame, statusFrame, metricsFrame, help, resourceStrip);
+LltopTheme.Apply([profileFrame, logFrame, statusFrame, metricsFrame], banner, profileList, logView, status, metrics, help, logStatus);
 
 ISystemResourceProvider resourceProvider = OperatingSystem.IsLinux()
     ? new LinuxSystemResourceProvider(
@@ -81,20 +84,24 @@ void ApplyLayout()
     help.Text = expandedHelp
         ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+R/F5] Find models\nBENCHMARK   [b] Setup/start   [B] Cancel   idle server required   reports → benchmarks_dir\nLOG & RUNS  [g] Resource graph   [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nTHEME       [t] Cycle theme ({LltopTheme.CurrentName})   [h/?] Show fewer keys"
         : $"[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [b] Benchmark\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [t] Theme: {LltopTheme.CurrentName}   [h/?] All keys   [q] Quit";
-    var reserved = 10 + helpHeight + 1;
-    if (win.Viewport.Width is > 0 and < 84)
+    var narrow = win.Viewport.Width is > 0 and < 84;
+    var reserved = (narrow ? 20 : 10) + helpHeight + 1;
+    if (narrow)
     {
         var profileHeight = Math.Max(6, (win.Viewport.Height - reserved - 2) / 3);
         profileFrame.X = 0; profileFrame.Y = 2; profileFrame.Width = Dim.Fill(); profileFrame.Height = profileHeight;
         logFrame.X = 0; logFrame.Y = Pos.Bottom(profileFrame); logFrame.Width = Dim.Fill(); logFrame.Height = Dim.Fill(reserved);
+        statusFrame.X = 0; statusFrame.Y = Pos.Bottom(logFrame); statusFrame.Width = Dim.Fill();
+        metricsFrame.X = 0; metricsFrame.Y = Pos.Bottom(statusFrame); metricsFrame.Width = Dim.Fill();
     }
     else
     {
         profileFrame.X = 0; profileFrame.Y = 2; profileFrame.Width = Dim.Percent(34); profileFrame.Height = Dim.Fill(reserved);
         logFrame.X = Pos.Right(profileFrame); logFrame.Y = 2; logFrame.Width = Dim.Fill(); logFrame.Height = Dim.Fill(reserved);
+        statusFrame.X = 0; statusFrame.Y = Pos.Bottom(profileFrame); statusFrame.Width = Dim.Percent(34);
+        metricsFrame.X = Pos.Right(statusFrame); metricsFrame.Y = Pos.Bottom(logFrame); metricsFrame.Width = Dim.Fill();
     }
-    statusFrame.Y = Pos.Bottom(logFrame);
-    help.Y = Pos.Bottom(statusFrame);
+    help.Y = narrow ? Pos.Bottom(metricsFrame) : Pos.Bottom(statusFrame);
     resourceStrip.Y = Pos.Bottom(help);
 }
 win.ViewportChanged += (_, _) => { ApplyLayout(); RefreshProfileItems(runningProfile); };
@@ -155,6 +162,7 @@ void UpdateStatus(string message = "")
         resourceGpuBackend = "";
         resourceGpuName = "";
         status.Text = $"STATE    {state}{pid}\n\nNo profiles found in {cfg.ProfilesDir}\n{message}";
+        metrics.Text = "Request stats  Waiting for a server launch…";
         return;
     }
     var model = string.IsNullOrWhiteSpace(p.Model) ? "not configured" : Path.GetFileName(p.Model);
@@ -194,10 +202,12 @@ void UpdateStatus(string message = "")
         : serverStats.LastHint.Length > 0 ? $"Hint      {serverStats.LastHint}"
         : plan.RemovedArguments.Count > 0 ? $"Warning   Unsupported options removed: {string.Join(", ", plan.RemovedArguments.Select(x => x.OptionName).Distinct(StringComparer.Ordinal))}"
         : !string.IsNullOrWhiteSpace(message) ? $"Info      {message}"
-        : runner.IsActive ? UiText.RequestMetrics(serverStats)
         : "";
     lines.Add(notice);
     status.Text = string.Join('\n', lines);
+    metrics.Text = runner.IsActive || externalServer is not null
+        ? UiText.RequestMetrics(serverStats)
+        : "Request stats  Waiting for a server launch…";
 }
 
 void RefreshLogs()

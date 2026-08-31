@@ -97,6 +97,7 @@ internal static class LltopTheme
         ListView profileList,
         LogTextView logView,
         Label status,
+        Label metrics,
         Label help,
         Label logStatus)
     {
@@ -116,6 +117,7 @@ internal static class LltopTheme
         Override(logView, _ => normal);
         logView.PanelAttribute = normal;
         Override(status, _ => normal);
+        Override(metrics, _ => normal);
     }
 
 #pragma warning disable CS0618 // Terminal.Gui 2.4 ships TextView as its built-in read-only text control.
