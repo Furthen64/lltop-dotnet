@@ -66,15 +66,31 @@ static class UiText
 
     public static string RequestMetrics(ServerStats stats)
     {
-        var metrics = new List<string>();
-        if (stats.PromptTokensPerSecond > 0) metrics.Add($"input {stats.PromptTokensPerSecond:F1} tok/s");
-        if (stats.EvalTokensPerSecond > 0) metrics.Add($"output {stats.EvalTokensPerSecond:F1} tok/s");
-        if (stats.GeneratedTokens > 0) metrics.Add($"{stats.GeneratedTokens:N0} output tokens");
-        if (stats.TotalLayers > 0) metrics.Add($"GPU layers {stats.OffloadedLayers}/{stats.TotalLayers}");
+        if (stats.Progress is > 0 and < 1)
+        {
+            var activeInput = $"reading {stats.Progress:P0}";
+            if (stats.PromptProgressTokens > 0) activeInput += $"  ·  {stats.PromptProgressTokens:N0} tokens";
+            if (stats.PromptProgressTokensPerSecond > 0) activeInput += $"  ·  {stats.PromptProgressTokensPerSecond:F1} tok/s";
+            return $"Input   {activeInput}\nOutput  waiting for generation…";
+        }
 
-        return metrics.Count == 0
-            ? "Request stats  Waiting for the first request…"
-            : $"Latest request  {string.Join("  ·  ", metrics)}";
+        if (stats.PromptTokensPerSecond <= 0 && stats.EvalTokensPerSecond <= 0)
+            return "Request stats  Waiting for the first request…";
+
+        var lines = new List<string>();
+        var input = stats.PromptTokensPerSecond > 0 ? $"{stats.PromptTokensPerSecond:F1} tok/s" : "not reported";
+        if (stats.PromptTokens > 0) input += $"  ·  {stats.PromptTokens:N0} tokens";
+        lines.Add($"Input   {input}");
+
+        var output = stats.EvalTokensPerSecond > 0 ? $"{stats.EvalTokensPerSecond:F1} tok/s" : "waiting for generation…";
+        if (stats.InitialGenerationTokensPerSecond > 0) output += $"  ·  avg at start: {stats.InitialGenerationTokensPerSecond:F2} tok/s";
+        lines.Add($"Output  {output}");
+
+        var details = new List<string>();
+        if (stats.GeneratedTokens > 0) details.Add($"{stats.GeneratedTokens:N0} output tokens");
+        if (stats.TotalLayers > 0) details.Add($"GPU layers {stats.OffloadedLayers}/{stats.TotalLayers}");
+        if (details.Count > 0) lines.Add($"Stats   {string.Join("  ·  ", details)}");
+        return string.Join('\n', lines);
     }
 
 }

@@ -18,7 +18,10 @@ internal sealed class ParsedLogLine
     public int TotalTokens { get; init; }
     public int OffloadedLayers { get; init; }
     public int TotalLayers { get; init; }
+    public int PromptProgressTokens { get; init; }
     public double Progress { get; init; }
+    public double PromptProgressTokensPerSecond { get; init; }
+    public bool IsRootRequestStart { get; init; }
     public string ChatFormat { get; init; } = "";
     public int ContextSlotSize { get; init; }
     public int GpuTotalMiB { get; init; }
@@ -46,6 +49,7 @@ internal static partial class LlamaLogParser
         var total = Total().Match(line);
         var offload = Offload().Match(line);
         var progress = Progress().Match(line);
+        var requestStart = RequestStart().Match(line);
         var chat = ChatFormat().Match(line);
         var context = Context().Match(line);
         var memory = Memory().Match(line);
@@ -69,7 +73,9 @@ internal static partial class LlamaLogParser
             EvalMs = D(eval, 1), EvalTokens = I(eval, 2), EvalMsPerToken = D(eval, 3), EvalTokensPerSecond = D(eval, 4),
             DecodedTokens = I(generation, 1), GenerationTokensPerSecond = D(generation, 2), GenerationTokensPerSecond3s = D(generation, 3),
             TotalMs = D(total, 1), TotalTokens = I(total, 2), OffloadedLayers = I(offload, 1), TotalLayers = I(offload, 2),
-            Progress = D(progress, 3), ChatFormat = chat.Success ? chat.Groups[1].Value.Trim() : "", ContextSlotSize = I(context, 1),
+            PromptProgressTokens = I(progress, 1), Progress = D(progress, 2), PromptProgressTokensPerSecond = D(progress, 3),
+            IsRootRequestStart = requestStart.Success && I(requestStart, 1) == 0,
+            ChatFormat = chat.Success ? chat.Groups[1].Value.Trim() : "", ContextSlotSize = I(context, 1),
             GpuTotalMiB = I(memory, 2), GpuFreeMiB = I(memory, 3), GpuModelMiB = I(memory, 4), GpuContextMiB = I(memory, 5), GpuComputeMiB = I(memory, 6),
             RuntimeBackend = runtimeDevice.Success ? runtimeDevice.Groups[1].Value.ToUpperInvariant() : "",
             RuntimeGpuName = runtimeDevice.Success ? runtimeDevice.Groups[2].Value.Trim() : "",
@@ -93,8 +99,10 @@ internal static partial class LlamaLogParser
     private static partial Regex Total();
     [GeneratedRegex(@"load_tensors: offloaded (\d+)/(\d+) layers to GPU")]
     private static partial Regex Offload();
-    [GeneratedRegex(@"prompt processing progress, n_tokens = (\d+), batch\.n_tokens = (\d+), progress = (\d+\.\d+)")]
+    [GeneratedRegex(@"prompt processing(?: progress)?, n_tokens\s*=\s*(\d+),(?:\s*batch\.n_tokens\s*=\s*\d+,)?\s*progress\s*=\s*(\d+(?:\.\d+)?)(?:,\s*t\s*=\s*[\d.]+\s*s\s*/\s*([\d.]+)\s*tokens per second)?")]
     private static partial Regex Progress();
+    [GeneratedRegex(@"processing task, is_child\s*=\s*(\d+)")]
+    private static partial Regex RequestStart();
     [GeneratedRegex(@"params_from_.*?Chat format: (.+)")]
     private static partial Regex ChatFormat();
     [GeneratedRegex(@"new prompt, n_ctx_slot = (\d+), n_keep = (\d+), task\.n_tokens = (\d+)")]
@@ -107,6 +115,7 @@ internal static partial class LlamaLogParser
 
 internal sealed class ServerStats
 {
+    readonly List<double> initialGenerationSamples = [];
     public double PromptTokensPerSecond { get; private set; }
     public double EvalTokensPerSecond { get; private set; }
     public double GenerationTokensPerSecond3s { get; private set; }
@@ -114,7 +123,10 @@ internal sealed class ServerStats
     public int GeneratedTokens { get; private set; }
     public int OffloadedLayers { get; private set; }
     public int TotalLayers { get; private set; }
+    public int PromptProgressTokens { get; private set; }
     public double Progress { get; private set; }
+    public double PromptProgressTokensPerSecond { get; private set; }
+    public double InitialGenerationTokensPerSecond => initialGenerationSamples.Count == 0 ? 0 : initialGenerationSamples.Average();
     public string ChatFormat { get; private set; } = "";
     public int ContextSlotSize { get; private set; }
     public int GpuTotalMiB { get; private set; }
@@ -131,6 +143,7 @@ internal sealed class ServerStats
     public void Consume(string line, DateTimeOffset? startedAt = null)
     {
         var p = LlamaLogParser.Parse(line);
+        if (p.IsRootRequestStart) ResetRequestMetrics();
         if (p.PromptTokensPerSecond > 0) { PromptTokensPerSecond = p.PromptTokensPerSecond; PromptTokens = p.PromptTokens; }
         if (p.EvalTokensPerSecond > 0) { EvalTokensPerSecond = p.EvalTokensPerSecond; GeneratedTokens = p.EvalTokens; }
         if (p.GenerationTokensPerSecond > 0)
@@ -138,9 +151,15 @@ internal sealed class ServerStats
             EvalTokensPerSecond = p.GenerationTokensPerSecond;
             GenerationTokensPerSecond3s = p.GenerationTokensPerSecond3s;
             GeneratedTokens = p.DecodedTokens;
+            if (initialGenerationSamples.Count < 10) initialGenerationSamples.Add(p.GenerationTokensPerSecond);
         }
         if (p.TotalLayers > 0) { OffloadedLayers = p.OffloadedLayers; TotalLayers = p.TotalLayers; }
-        if (p.Progress > 0) Progress = p.Progress;
+        if (p.Progress > 0)
+        {
+            Progress = p.Progress;
+            PromptProgressTokens = p.PromptProgressTokens;
+            PromptProgressTokensPerSecond = p.PromptProgressTokensPerSecond;
+        }
         if (p.ChatFormat.Length > 0) ChatFormat = p.ChatFormat;
         if (p.ContextSlotSize > 0) ContextSlotSize = p.ContextSlotSize;
         if (p.GpuTotalMiB > 0) { GpuTotalMiB = p.GpuTotalMiB; GpuFreeMiB = p.GpuFreeMiB; GpuModelMiB = p.GpuModelMiB; GpuContextMiB = p.GpuContextMiB; GpuComputeMiB = p.GpuComputeMiB; }
@@ -151,5 +170,18 @@ internal sealed class ServerStats
             LastError = p.ErrorMessage;
             Issues.Add(new RunIssue("error", p.ErrorKind, p.ErrorMessage, startedAt is null ? 0 : Math.Max(0, (DateTimeOffset.Now - startedAt.Value).TotalSeconds)));
         }
+    }
+
+    void ResetRequestMetrics()
+    {
+        PromptTokensPerSecond = 0;
+        EvalTokensPerSecond = 0;
+        GenerationTokensPerSecond3s = 0;
+        PromptTokens = 0;
+        GeneratedTokens = 0;
+        PromptProgressTokens = 0;
+        Progress = 0;
+        PromptProgressTokensPerSecond = 0;
+        initialGenerationSamples.Clear();
     }
 }

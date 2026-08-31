@@ -80,14 +80,22 @@ public sealed class UiTextTests
 
         var text = UiText.RequestMetrics(stats);
 
-        Assert.Equal("Latest request  input 140.7 tok/s  ·  output 19.8 tok/s  ·  399 output tokens", text);
-        Assert.DoesNotContain("prompt", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Input   140.7 tok/s  ·  114 tokens\nOutput  19.8 tok/s  ·  avg at start: 19.80 tok/s\nStats   399 output tokens", text);
     }
 
     [Fact]
     public void RequestMetrics_ExplainsWhenNoRequestHasProducedMetrics()
     {
         Assert.Equal("Request stats  Waiting for the first request…", UiText.RequestMetrics(new ServerStats()));
+    }
+
+    [Fact]
+    public void RequestMetrics_ShowsLivePromptProcessingProgress()
+    {
+        var stats = new ServerStats();
+        stats.Consume("prompt processing, n_tokens = 2560, progress = 0.32, t = 10.00 s / 256.08 tokens per second");
+
+        Assert.Equal("Input   reading 32 %  ·  2,560 tokens  ·  256.1 tok/s\nOutput  waiting for generation…", UiText.RequestMetrics(stats));
     }
 
 }

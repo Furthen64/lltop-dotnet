@@ -27,6 +27,21 @@ public sealed class LlamaLogParserTests
     }
 
     [Fact]
+    public void ParsesLivePromptProcessingProgress()
+    {
+        const string line = "1.37.283.140 I slot print_timing: id 0 | task 0 | prompt processing, n_tokens = 2560, progress = 0.32, t = 10.00 s / 256.08 tokens per second";
+
+        var parsed = LlamaLogParser.Parse(line);
+        var stats = new ServerStats();
+        stats.Consume(line);
+
+        Assert.Equal(2560, parsed.PromptProgressTokens);
+        Assert.Equal(0.32, parsed.Progress);
+        Assert.Equal(256.08, parsed.PromptProgressTokensPerSecond);
+        Assert.Equal(parsed.PromptProgressTokens, stats.PromptProgressTokens);
+    }
+
+    [Fact]
     public void ParsesActiveCudaDeviceFromLiveLog()
     {
         var parsed = LlamaLogParser.Parse("0.00.152.688 I - CUDA0 : NVIDIA GeForce RTX 4070 Ti SUPER (15941 MiB, 15132 MiB free)");
@@ -63,6 +78,22 @@ public sealed class LlamaLogParserTests
         Assert.Equal(399, stats.GeneratedTokens);
         Assert.Equal(19.80, stats.EvalTokensPerSecond);
         Assert.Equal(19.61, stats.GenerationTokensPerSecond3s);
+    }
+
+    [Fact]
+    public void AveragesTheFirstTenGenerationRatesForEachRootRequest()
+    {
+        var stats = new ServerStats();
+        stats.Consume("processing task, is_child = 0");
+        for (var rate = 1; rate <= 11; rate++)
+            stats.Consume($"n_decoded = {rate}, tg = {rate}.0 t/s, tg_3s = {rate}.0 t/s");
+
+        Assert.Equal(5.5, stats.InitialGenerationTokensPerSecond);
+
+        stats.Consume("processing task, is_child = 0");
+        stats.Consume("n_decoded = 1, tg = 40.1 t/s, tg_3s = 40.1 t/s");
+        stats.Consume("n_decoded = 2, tg = 40.4 t/s, tg_3s = 40.4 t/s");
+        Assert.Equal(40.25, stats.InitialGenerationTokensPerSecond);
     }
 
     [Fact]
