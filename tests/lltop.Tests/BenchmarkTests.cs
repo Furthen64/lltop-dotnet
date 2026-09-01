@@ -40,6 +40,29 @@ public sealed class BenchmarkTests
     }
 
     [Fact]
+    public void GenerateCacheLayer_KeepsTheChosenContextAndCoversCacheFormats()
+    {
+        var contextProfile = new Profile { Name = "test", Ctx = 32768, Ngl = 0, Batch = 1, UBatch = 1, Parallel = 1 };
+
+        var cases = BenchmarkCases.GenerateCacheLayer(contextProfile);
+
+        Assert.Equal(5, cases.Count);
+        Assert.All(cases, item => Assert.Equal(32768, item.Profile.Ctx));
+        Assert.Contains(cases, item => item.Profile.CacheK == "q4_0" && item.Profile.CacheV == "q4_0");
+        Assert.Contains(cases, item => item.Profile.CacheK == "q8_0" && item.Profile.CacheV == "q8_0");
+        Assert.Contains(cases, item => item.Profile.CacheK == "f16" && item.Profile.CacheV == "f16");
+    }
+
+    [Theory]
+    [InlineData("The result is 93", 93, true)]
+    [InlineData("The result is 93.", 93, true)]
+    [InlineData("The result is 92", 93, false)]
+    public void MathSuite_GradesTheFinalInteger(string response, int answer, bool expected)
+    {
+        Assert.Equal(expected, MathSuite.IsCorrect(response, answer));
+    }
+
+    [Fact]
     public void Generate_RejectsInvalidSettings()
     {
         var profile = new Profile { Name = "test" };

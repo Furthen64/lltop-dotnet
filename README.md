@@ -25,7 +25,7 @@ A .NET 10 + Terminal.Gui v2 control center for llama.cpp's `llama-server`.
 - Enable Qwen3.6-35B-A3B and Qwen3.8-27B vision profiles with a matching `mmproj-BF16.gguf` projector.
 - Discover sibling `mmproj*.gguf` files and use their GGUF metadata to suggest the matching vision projector.
 - Exclude local models from discovery with glob patterns in `<models_dir>/.llmignore`.
-- Run baseline-plus-sweep memory benchmarks with warmup, post-warmup VRAM sampling,
+- Run layered context, KV-cache, and math benchmarks with warmup, post-warmup VRAM sampling,
   OOM stop/continue handling, and standalone HTML/JSON reports.
 
 Run with:
@@ -74,18 +74,24 @@ external plotting without depending on one llama.cpp log format.
 
 Select a profile and press `b` to configure a benchmark. The server must be
 idle: lltop refuses to start a benchmark while a managed or externally detected
-`llama-server` is active. Enter one sweep per line as either a numeric range,
-such as `ctx=4096:8192`, or categorical values, such as
-`cache_k=q4_0,q8_0`. Each benchmark runs the baseline followed by independent
-one-at-a-time sweep cases; it never combines parameter changes.
+`llama-server` is active. Set a context start, stop, and number of steps; steps
+include both endpoints. The selected profile is the reference configuration,
+not a benchmark case, and a context point that exactly matches it is skipped.
+
+After the context sweep, inspect the results and choose a completed context
+case to continue. lltop then runs a KV-cache layer at that chosen context using
+`q4_0/q4_0`, `q8_0/q8_0`, `f16/f16`, `iq4_nl/iq4_nl`, and `q4_0/q8_0` cache
+K/V combinations. Each cache case also runs a three-question, deterministic
+multi-step arithmetic suite; the terminal and HTML report show its score (for
+example, `3/3`) beside VRAM headroom.
 
 The configured prompt is the global warmup workload for every case. lltop waits
 up to 300 seconds for readiness, then samples available VRAM once per second for
 10 seconds after warmup. Press `B` to cancel; lltop stops the benchmark-owned
 server and records cancellation. OOM outcomes can stop the remaining cases or
 continue, as chosen in setup. Benchmark executions are not added to normal run
-history. JSON and self-contained HTML reports are saved in `benchmarks_dir`
-(`~/.config/lltop/benchmarks` by default).
+history. Each layer produces JSON and self-contained HTML reports in
+`benchmarks_dir` (`~/.config/lltop/benchmarks` by default).
 
 ## Theme
 

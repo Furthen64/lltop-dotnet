@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 internal enum BenchmarkCaseStatus { Pending, Running, Completed, Failed, Cancelled, OutOfMemory, Skipped }
 internal enum BenchmarkOomPolicy { Stop, Continue }
@@ -51,6 +52,8 @@ internal sealed class BenchmarkCase
     [JsonPropertyName("vram_used_bytes")] public long? VramUsedBytes { get; set; }
     [JsonPropertyName("vram_total_bytes")] public long? VramTotalBytes { get; set; }
     [JsonPropertyName("server_log_path")] public string ServerLogPath { get; set; } = "";
+    [JsonPropertyName("math_correct")] public int? MathCorrect { get; set; }
+    [JsonPropertyName("math_total")] public int? MathTotal { get; set; }
 }
 
 internal sealed class BenchmarkRecord
@@ -68,6 +71,7 @@ internal sealed class BenchmarkRecord
     [JsonPropertyName("cases")] public List<BenchmarkCase> Cases { get; set; } = [];
     [JsonPropertyName("json_report")] public string JsonReport { get; set; } = "";
     [JsonPropertyName("html_report")] public string HtmlReport { get; set; } = "";
+    [JsonPropertyName("run_math_suite")] public bool RunMathSuite { get; set; }
 }
 
 internal static class BenchmarkCases
@@ -104,6 +108,24 @@ internal static class BenchmarkCases
             }
         }
         return result;
+    }
+
+    public static List<BenchmarkCase> GenerateCacheLayer(Profile contextProfile) =>
+    [
+        CacheCase(contextProfile, "q4_0", "q4_0"),
+        CacheCase(contextProfile, "q8_0", "q8_0"),
+        CacheCase(contextProfile, "f16", "f16"),
+        CacheCase(contextProfile, "iq4_nl", "iq4_nl"),
+        CacheCase(contextProfile, "q4_0", "q8_0")
+    ];
+
+    static BenchmarkCase CacheCase(Profile contextProfile, string cacheK, string cacheV)
+    {
+        var profile = contextProfile.Copy(contextProfile.Name);
+        profile.CacheK = cacheK;
+        profile.CacheV = cacheV;
+        profile.Validate();
+        return Create($"cache-{cacheK}-{cacheV}", $"KV cache = {cacheK} / {cacheV}", "kv_cache", $"{cacheK}/{cacheV}", profile);
     }
 
     static BenchmarkCase Create(string id, string label, string setting, string value, Profile profile) =>
@@ -184,8 +206,8 @@ internal static class BenchmarkReport
     public static string Html(BenchmarkRecord benchmark)
     {
         var json = JsonSerializer.Serialize(benchmark, new JsonSerializerOptions { Encoder = JavaScriptEncoder.Default });
-        var rows = string.Join("", benchmark.Cases.Select(c => $"<tr><td>{E(c.Label)}</td><td>{E(c.Status.ToString())}</td><td>{E(c.PreWarmupVramUsedBytes is null ? "unavailable" : FormatBytes(c.PreWarmupVramUsedBytes))}</td><td>{E(FormatVram(c))}</td><td>{E(FreeVram(c))}</td><td class=\"{Risk(c).ToLowerInvariant()}\">{E(Risk(c))}</td><td>{E(c.Error)}</td></tr>"));
-        return $"<!doctype html><html><head><meta charset=\"utf-8\"><title>lltop benchmark {E(benchmark.ProfileName)}</title><style>body{{font:16px system-ui;margin:2rem;color:#1f2937}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #d1d5db;padding:.5rem;text-align:left}}th{{background:#f3f4f6}}.warning{{color:#a16207;font-weight:700}}.critical{{color:#dc2626;font-weight:700}}.normal{{color:#15803d;font-weight:700}}code{{white-space:pre-wrap}}</style></head><body><h1>Benchmark: {E(benchmark.ProfileName)}</h1><p>Status: <b>{E(benchmark.Status.ToString())}</b> · Started: {E(benchmark.StartedAt.LocalDateTime.ToString("u"))}</p><p>Workload: {E(benchmark.Workload.Prompt)} · max tokens {benchmark.Workload.MaxTokens}</p><table><thead><tr><th>Case</th><th>Status</th><th>Pre-Warmup VRAM</th><th>Post-Warmup VRAM</th><th>Free-VRAM</th><th>Risk</th><th>Error</th></tr></thead><tbody>{rows}</tbody></table><h2>Embedded data</h2><code id=\"data\"></code><script>document.getElementById('data').textContent=JSON.stringify({json},null,2);</script></body></html>";
+        var rows = string.Join("", benchmark.Cases.Select(c => $"<tr><td>{E(c.Label)}</td><td>{E(c.Status.ToString())}</td><td>{E(c.PreWarmupVramUsedBytes is null ? "unavailable" : FormatBytes(c.PreWarmupVramUsedBytes))}</td><td>{E(FormatVram(c))}</td><td>{E(FreeVram(c))}</td><td>{E(c.MathTotal is null ? "—" : $"{c.MathCorrect}/{c.MathTotal}")}</td><td class=\"{Risk(c).ToLowerInvariant()}\">{E(Risk(c))}</td><td>{E(c.Error)}</td></tr>"));
+        return $"<!doctype html><html><head><meta charset=\"utf-8\"><title>lltop benchmark {E(benchmark.ProfileName)}</title><style>body{{font:16px system-ui;margin:2rem;color:#1f2937}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #d1d5db;padding:.5rem;text-align:left}}th{{background:#f3f4f6}}.warning{{color:#a16207;font-weight:700}}.critical{{color:#dc2626;font-weight:700}}.normal{{color:#15803d;font-weight:700}}code{{white-space:pre-wrap}}</style></head><body><h1>Benchmark: {E(benchmark.ProfileName)}</h1><p>Status: <b>{E(benchmark.Status.ToString())}</b> · Started: {E(benchmark.StartedAt.LocalDateTime.ToString("u"))}</p><p>Workload: {E(benchmark.Workload.Prompt)} · max tokens {benchmark.Workload.MaxTokens}</p><table><thead><tr><th>Case</th><th>Status</th><th>Pre-Warmup VRAM</th><th>Post-Warmup VRAM</th><th>Free-VRAM</th><th>Math</th><th>Risk</th><th>Error</th></tr></thead><tbody>{rows}</tbody></table><h2>Embedded data</h2><code id=\"data\"></code><script>document.getElementById('data').textContent=JSON.stringify({json},null,2);</script></body></html>";
     }
 
     static string E(string? value) => System.Net.WebUtility.HtmlEncode(value ?? "");
@@ -256,13 +278,13 @@ internal sealed class BenchmarkRunner
     {
         if (serverIsActive()) throw new InvalidOperationException("Stop the active llama-server before starting a benchmark.");
         benchmark.Workload.Validate();
-        benchmark.Cases = BenchmarkCases.Generate(benchmark.BaselineProfile, benchmark.Sweeps);
+        if (benchmark.Cases.Count == 0) benchmark.Cases = BenchmarkCases.Generate(benchmark.BaselineProfile, benchmark.Sweeps);
         benchmark.Status = BenchmarkCaseStatus.Running;
         progress?.Invoke(benchmark);
         foreach (var item in benchmark.Cases)
         {
             if (cancellationToken.IsCancellationRequested) { item.Status = BenchmarkCaseStatus.Cancelled; break; }
-            await RunCaseAsync(item, benchmark.Workload, cancellationToken);
+            await RunCaseAsync(item, benchmark.Workload, benchmark.RunMathSuite, cancellationToken);
             progress?.Invoke(benchmark);
             if (item.Status == BenchmarkCaseStatus.OutOfMemory && benchmark.OomPolicy == BenchmarkOomPolicy.Stop)
             {
@@ -280,7 +302,7 @@ internal sealed class BenchmarkRunner
         progress?.Invoke(benchmark);
     }
 
-    async Task RunCaseAsync(BenchmarkCase item, BenchmarkWorkload workload, CancellationToken cancellationToken)
+    async Task RunCaseAsync(BenchmarkCase item, BenchmarkWorkload workload, bool runMathSuite, CancellationToken cancellationToken)
     {
         item.Status = BenchmarkCaseStatus.Running; item.StartedAt = DateTimeOffset.Now;
         var runner = new ServerRunner();
@@ -295,6 +317,12 @@ internal sealed class BenchmarkRunner
             item.PreWarmupVramUsedBytes = preWarmup.VramUsedBytes;
             item.VramTotalBytes ??= preWarmup.VramTotalBytes;
             await WarmupAsync(item.Profile, workload, cancellationToken);
+            if (runMathSuite)
+            {
+                var score = await RunMathSuiteAsync(item.Profile, cancellationToken);
+                item.MathCorrect = score.Correct;
+                item.MathTotal = score.Total;
+            }
             var until = DateTimeOffset.Now.AddSeconds(10);
             while (DateTimeOffset.Now < until)
             {
@@ -343,6 +371,21 @@ internal sealed class BenchmarkRunner
         if (!response.IsSuccessStatusCode) throw new InvalidOperationException($"Warmup request failed: {(int)response.StatusCode} {response.ReasonPhrase}.");
     }
 
+    async Task<(int Correct, int Total)> RunMathSuiteAsync(Profile profile, CancellationToken token)
+    {
+        var correct = 0;
+        foreach (var (question, answer) in MathSuite.Problems)
+        {
+            var body = new { messages = new[] { new { role = "user", content = $"Solve this multi-step arithmetic problem. Reply with only the final integer.\n\n{question}" } }, max_tokens = 64, temperature = 0.0, stream = false };
+            using var response = await httpClient.PostAsJsonAsync(BaseUri(profile) + "/v1/chat/completions", body, token);
+            if (!response.IsSuccessStatusCode) throw new InvalidOperationException($"Math request failed: {(int)response.StatusCode} {response.ReasonPhrase}.");
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(token));
+            var content = json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
+            if (MathSuite.IsCorrect(content, answer)) correct++;
+        }
+        return (correct, MathSuite.Problems.Count);
+    }
+
     static string BaseUri(Profile profile)
     {
         var host = profile.Host is "0.0.0.0" or "::" ? "127.0.0.1" : profile.Host;
@@ -353,5 +396,21 @@ internal sealed class BenchmarkRunner
     {
         var text = string.Join('\n', lines.Append(extra)).ToLowerInvariant();
         return text.Contains("out of memory") || text.Contains("cuda error") || text.Contains("hip error") || text.Contains("failed to allocate") || text.Contains("failed to fit params");
+    }
+}
+
+internal static class MathSuite
+{
+    internal static readonly IReadOnlyList<(string Question, int Answer)> Problems =
+    [
+        ("A workshop makes 18 parts each day for 7 days. It uses 21 parts for testing and packs the rest equally into 5 boxes. How many parts go in each box?", 21),
+        ("Mira starts with 84 credits. She spends 19, then doubles what remains, then gives 37 credits away. How many credits does she have?", 93),
+        ("A train travels 48 km per hour for 3 hours, then 36 km per hour for 2 hours. It returns 60 km by a shorter route. How many km from its starting point is it?", 156)
+    ];
+
+    internal static bool IsCorrect(string response, int answer)
+    {
+        var numbers = Regex.Matches(response, @"-?\d+");
+        return numbers.Count > 0 && int.TryParse(numbers[^1].Value, CultureInfo.InvariantCulture, out var final) && final == answer;
     }
 }

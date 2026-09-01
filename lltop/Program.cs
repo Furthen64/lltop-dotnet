@@ -559,10 +559,36 @@ async Task RunBenchmark()
             UpdateStatus($"Benchmark {completed}/{update.Cases.Count}: {update.Cases.FirstOrDefault(x => x.Status == BenchmarkCaseStatus.Running)?.Label ?? update.Status.ToString()}");
             RefreshLogs();
         }), benchmarkCancellation.Token);
+        var selectedContext = await PickContextForCacheLayer(benchmark);
+        if (selectedContext is null)
+        {
+            app.Invoke(() => UpdateStatus($"Context benchmark {benchmark.Status}. Reports: {benchmark.HtmlReport}"));
+            return;
+        }
+
+        var cacheBenchmark = new BenchmarkRecord
+        {
+            BenchmarkId = $"{DateTimeOffset.Now:yyyyMMdd_HHmmss}_{ProfileStore.Slugify(profile.Name)}_cache",
+            ProfileName = profile.Name,
+            BaselineProfile = selectedContext.Copy(selectedContext.Name),
+            StartedAt = DateTimeOffset.Now,
+            Workload = setup.Workload,
+            OomPolicy = setup.OomPolicy,
+            RunMathSuite = true,
+            Cases = BenchmarkCases.GenerateCacheLayer(selectedContext)
+        };
+        activeBenchmark = cacheBenchmark;
+        app.Invoke(() => UpdateStatus($"Cache and math benchmark started: 0/{cacheBenchmark.Cases.Count} cases. Press B to cancel."));
+        await benchmarkRunner.RunAsync(cacheBenchmark, update => app.Invoke(() =>
+        {
+            var completed = update.Cases.Count(x => x.Status is not BenchmarkCaseStatus.Pending and not BenchmarkCaseStatus.Running);
+            UpdateStatus($"Cache/math benchmark {completed}/{update.Cases.Count}: {update.Cases.FirstOrDefault(x => x.Status == BenchmarkCaseStatus.Running)?.Label ?? update.Status.ToString()}");
+            RefreshLogs();
+        }), benchmarkCancellation.Token);
         app.Invoke(() =>
         {
-            UpdateStatus($"Benchmark {benchmark.Status}. Reports: {benchmark.HtmlReport}");
-            ShowBenchmarkResults(app, benchmark);
+            UpdateStatus($"Cache and math benchmark {cacheBenchmark.Status}. Reports: {cacheBenchmark.HtmlReport}");
+            ShowBenchmarkResults(app, cacheBenchmark);
         });
     }
     catch (Exception ex) { app.Invoke(() => UpdateStatus($"Benchmark failed: {ex.Message}")); }
@@ -573,6 +599,43 @@ async Task RunBenchmark()
         activeBenchmark = null;
         app.Invoke(RefreshLogs);
     }
+}
+
+Task<Profile?> PickContextForCacheLayer(BenchmarkRecord benchmark)
+{
+    var completion = new TaskCompletionSource<Profile?>();
+    app.Invoke(() =>
+    {
+        ShowBenchmarkResults(app, benchmark);
+        var candidates = benchmark.Cases.Where(x => x.Status == BenchmarkCaseStatus.Completed && x.Setting == "ctx").ToList();
+        if (candidates.Count == 0)
+        {
+            MessageBox.ErrorQuery(app, "Cache benchmark", "No completed context cases are available for the cache layer.", "OK");
+            completion.TrySetResult(null);
+            return;
+        }
+
+        var dialog = new Window { Title = " Choose context for cache + math layer ", Width = 88, Height = 18 };
+        dialog.Add(new Label { X = 2, Y = 1, Text = "Choose the completed context configuration to test with KV cache formats and the math suite." });
+        var items = new ObservableCollection<string>(candidates.Select(x => $"{x.Label,-18}  {BenchmarkReport.Headroom(x),-30}  {BenchmarkReport.FormatVram(x)}"));
+        var list = new ListView { X = 2, Y = 3, Width = Dim.Fill(4), Height = 9 };
+        list.SetSource(items);
+        var use = new Button { X = 2, Y = 13, Text = "Use selected context", IsDefault = true };
+        var cancel = new Button { X = Pos.Right(use) + 2, Y = 13, Text = "Finish" };
+        use.Accepting += (_, _) =>
+        {
+            var index = Math.Clamp(list.SelectedItem ?? 0, 0, candidates.Count - 1);
+            var selected = candidates[index].Profile;
+            completion.TrySetResult(selected.Copy(selected.Name));
+            app.RequestStop();
+        };
+        cancel.Accepting += (_, _) => { completion.TrySetResult(null); app.RequestStop(); };
+        dialog.KeyDown += (_, key) => { if (key.KeyCode == KeyCode.Esc) { completion.TrySetResult(null); app.RequestStop(); key.Handled = true; } };
+        dialog.Add(list, use, cancel);
+        app.Run(dialog);
+        completion.TrySetResult(null);
+    });
+    return completion.Task;
 }
 
 void CancelBenchmark()
@@ -1260,10 +1323,10 @@ static void ShowBenchmarkResults(IApplication app, BenchmarkRecord benchmark)
         $"Peak VRAM    {(peak is null ? "unavailable" : $"{peak.Label} · {BenchmarkReport.FormatVram(peak)}")}",
         $"Risk         {(warnings.Count == 0 ? "No close-to-OOM cases detected." : $"{warnings.Count} close-to-OOM case(s) — see ! rows below.")}",
         "",
-        "CASE                         STATUS        POST-WARMUP VRAM                 HEADROOM / RISK",
+        "CASE                         STATUS        MATH     POST-WARMUP VRAM                 HEADROOM / RISK",
         new string('─', 92)
     };
-    lines.AddRange(benchmark.Cases.Select(x => $"{x.Label,-28} {x.Status,-13} {BenchmarkReport.FormatVram(x),-34} {BenchmarkReport.Headroom(x)}{(x.Error.Length > 0 ? $"  {x.Error}" : "")}"));
+    lines.AddRange(benchmark.Cases.Select(x => $"{x.Label,-28} {x.Status,-13} {(x.MathTotal is null ? "—" : $"{x.MathCorrect}/{x.MathTotal}"),-8} {BenchmarkReport.FormatVram(x),-34} {BenchmarkReport.Headroom(x)}{(x.Error.Length > 0 ? $"  {x.Error}" : "")}"));
     lines.AddRange(["", "Reports", $"HTML  {benchmark.HtmlReport}", $"JSON  {benchmark.JsonReport}", "", "Close-to-OOM means peak sampled VRAM was at least 80% of reported total GPU VRAM."]);
     var results = new LogTextView { X = 1, Y = 1, Width = Dim.Fill(2), Height = Dim.Fill(3), ReadOnly = true, WordWrap = true,
         Text = string.Join('\n', lines), HighlightSeverityMarkersOnly = true };
