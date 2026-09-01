@@ -60,7 +60,7 @@ var metricsFrame = new FrameView { Title = " Metrics ", X = Pos.Right(statusFram
 var metrics = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(), Text = "Waiting for the first request…" };
 metricsFrame.Add(metrics);
 var help = new Label { X = 1, Y = Pos.Bottom(statusFrame), Width = Dim.Fill(2), Height = 3,
-    Text = "[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [p] Preview\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [h/?] All keys   [q] Quit" };
+    Text = "[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [Ctrl+F] Favorite\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [h/?] All keys   [q] Quit" };
 var resourceStrip = new ResourceStripView { X = 1, Y = Pos.Bottom(help), Width = Dim.Fill(2) };
 win.Add(banner, profileFrame, logFrame, statusFrame, metricsFrame, help, resourceStrip);
 LltopTheme.Apply([profileFrame, logFrame, statusFrame, metricsFrame], banner, profileList, logView, status, metrics, help, logStatus);
@@ -82,8 +82,8 @@ void ApplyLayout()
     var helpHeight = expandedHelp ? 6 : 2;
     help.Height = helpHeight;
     help.Text = expandedHelp
-        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+R/F5] Find models\nBENCHMARK   [b] Setup/start   [B] Cancel   idle server required   reports → benchmarks_dir\nLOG & RUNS  [g] Resource graph   [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nTHEME       [t] Cycle theme ({LltopTheme.CurrentName})   [h/?] Show fewer keys"
-        : $"[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [b] Benchmark\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [t] Theme: {LltopTheme.CurrentName}   [h/?] All keys   [q] Quit";
+        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+F] Favorite/unfavorite   [Ctrl+R/F5] Find models\nBENCHMARK   [b] Setup/start   [B] Cancel   idle server required   reports → benchmarks_dir\nLOG & RUNS  [g] Resource graph   [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nTHEME       [t] Cycle theme ({LltopTheme.CurrentName})   [h/?] Show fewer keys"
+        : $"[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [Ctrl+F] Favorite\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [t] Theme: {LltopTheme.CurrentName}   [h/?] All keys   [q] Quit";
     var narrow = win.Viewport.Width is > 0 and < 84;
     var reserved = (narrow ? 20 : 10) + helpHeight + 1;
     if (narrow)
@@ -125,7 +125,12 @@ void RefreshProfileItems(string? selectName = null)
             rows.Add(new UiText.ProfileRowData(marker, p.Vision, p.Name, p.Tags, CompactModelSize(p.Model)));
         }
         var width = Math.Max(12, profileFrame.Viewport.Width > 0 ? profileFrame.Viewport.Width - 3 : 32);
-        foreach (var line in UiText.ProfileRows(rows, width)) profileItems.Add(line);
+        var favoriteCount = profiles.Count(p => p.Favorite);
+        foreach (var (line, index) in UiText.ProfileRows(rows, width).Select((line, index) => (line, index)))
+        {
+            if (index == favoriteCount && favoriteCount > 0) profileItems.Add(new string('─', width));
+            profileItems.Add(line);
+        }
     }
     profileList.SetSource(profileItems);
     if (profiles.Count == 0) { selected = 0; profileList.SelectedItem = 0; }
@@ -133,7 +138,7 @@ void RefreshProfileItems(string? selectName = null)
     {
         var match = selectName is null ? -1 : profiles.FindIndex(p => p.Name.Equals(selectName, StringComparison.OrdinalIgnoreCase));
         selected = Math.Clamp(match >= 0 ? match : selected, 0, profiles.Count - 1);
-        profileList.SelectedItem = selected;
+        profileList.SelectedItem = selected + (profiles.Take(selected).Any(p => !p.Favorite) && profiles.Any(p => p.Favorite) ? 1 : 0);
     }
 }
 
@@ -629,6 +634,21 @@ void DeleteSelected()
     catch (Exception ex) { UpdateStatus(ex.Message); }
 }
 
+void ToggleFavorite()
+{
+    var profile = SelectedProfile();
+    if (profile is null) { UpdateStatus("No profile selected."); return; }
+    profile.Favorite = !profile.Favorite;
+    try
+    {
+        store.Save(profile);
+        ReloadProfiles(profile.Name, profile.Favorite ? $"Added {profile.Name} to favorites." : $"Removed {profile.Name} from favorites.");
+    }
+    catch (Exception ex) { UpdateStatus(ex.Message); }
+}
+
+bool IsCtrlF(Key key) => key.IsCtrl && key.NoCtrl.NoShift.KeyCode == KeyCode.F;
+
 async Task Quit()
 {
     if (closing) return;
@@ -671,8 +691,23 @@ runner.Exited += exit => app.Invoke(() =>
 });
 profileList.ValueChanged += (_, _) =>
 {
-    if (profileList.SelectedItem is int value && profiles.Count > 0) selected = Math.Clamp(value, 0, profiles.Count - 1);
+    if (profileList.SelectedItem is int value && profiles.Count > 0)
+    {
+        var favoriteCount = profiles.Count(p => p.Favorite);
+        if (favoriteCount > 0 && favoriteCount < profiles.Count && value == favoriteCount)
+        {
+            profileList.SelectedItem = value + 1;
+            return;
+        }
+        selected = Math.Clamp(value - (favoriteCount > 0 && value > favoriteCount ? 1 : 0), 0, profiles.Count - 1);
+    }
     RefreshLogs(); UpdateStatus();
+};
+profileList.KeyDown += (_, key) =>
+{
+    if (!IsCtrlF(key)) return;
+    ToggleFavorite();
+    key.Handled = true;
 };
 
 app.Keyboard.KeyDown += (_, key) =>
@@ -721,6 +756,7 @@ app.Keyboard.KeyDown += (_, key) =>
     else if (text == "s") { _ = Stop(false); key.Handled = true; }
     else if (text == "K") { _ = Stop(true); key.Handled = true; }
     else if (key.KeyCode == (KeyCode.R | KeyCode.CtrlMask)) { RefreshModels(); key.Handled = true; }
+    else if (IsCtrlF(key)) { ToggleFavorite(); key.Handled = true; }
     else if (text.Equals("r", StringComparison.OrdinalIgnoreCase)) { _ = Launch(true); key.Handled = true; }
     else if (text == "n") { NewProfile(); key.Handled = true; }
     else if (text.Equals("e", StringComparison.OrdinalIgnoreCase)) { EditSelected(); key.Handled = true; }

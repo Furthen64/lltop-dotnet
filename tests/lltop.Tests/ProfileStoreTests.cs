@@ -15,7 +15,7 @@ public sealed class ProfileStoreTests : IDisposable
             Vision = true, Mmproj = "/models/mmproj-BF16.gguf",
             RepeatPenalty = 1.15, RepeatLastN = 128, PresencePenalty = .2, FrequencyPenalty = .3,
             ReasoningBudget = 2048, ImageMinTokens = 1024, ExtraArgs = ["--verbose", "--log-colors", "value with spaces"],
-            Tags = ["fast", "coding model"]
+            Tags = ["fast", "coding model"], Favorite = true
         };
 
         store.Save(original);
@@ -40,6 +40,20 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.Equal(1024, loaded.ImageMinTokens);
         Assert.Equal(original.ExtraArgs, loaded.ExtraArgs);
         Assert.Equal(["fast", "coding model"], loaded.Tags);
+        Assert.True(loaded.Favorite);
+    }
+
+    [Fact]
+    public void LoadAll_PutsFavoritesBeforeOtherProfiles()
+    {
+        var store = new ProfileStore(directory);
+        store.Save(new Profile { Name = "zulu", Model = "/tmp/zulu.gguf" });
+        store.Save(new Profile { Name = "bravo", Model = "/tmp/bravo.gguf", Favorite = true });
+        store.Save(new Profile { Name = "alpha", Model = "/tmp/alpha.gguf", Favorite = true });
+
+        var result = store.LoadAll();
+
+        Assert.Equal(["alpha", "bravo", "zulu"], result.Profiles.Select(p => p.Name));
     }
 
     [Fact]

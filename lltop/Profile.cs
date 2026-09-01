@@ -5,6 +5,7 @@ sealed class Profile
 {
     public string Name { get; set; } = "";
     public string Description { get; set; } = "";
+    public bool Favorite { get; set; }
     public List<string> Tags { get; set; } = [];
     public string LlamaServer { get; set; } = "";
     public string Model { get; set; } = "";
@@ -51,7 +52,7 @@ sealed class Profile
 
     public Profile Copy(string name) => new()
     {
-        Name = name, Description = Description, Tags = [.. Tags], LlamaServer = LlamaServer, Model = Model,
+        Name = name, Description = Description, Favorite = Favorite, Tags = [.. Tags], LlamaServer = LlamaServer, Model = Model,
         Vision = Vision, Mmproj = Mmproj, ImageMinTokens = ImageMinTokens,
         Host = Host, Port = Port, Alias = Alias, Ctx = Ctx, Ngl = Ngl,
         CacheK = CacheK, CacheV = CacheV, Temp = Temp, TopP = TopP, TopK = TopK,
@@ -123,7 +124,7 @@ sealed class ProfileStore(string directory)
             }
             catch (Exception ex) { errors.Add($"{Path.GetFileName(path)}: {ex.Message}"); }
         }
-        return new(profiles.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList(), errors);
+        return new(profiles.OrderByDescending(p => p.Favorite).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList(), errors);
     }
 
     public void Save(Profile profile)
@@ -174,7 +175,7 @@ sealed class ProfileStore(string directory)
         void I(string key, int value) => b.Append(key).Append(" = ").AppendLine(value.ToString(CultureInfo.InvariantCulture));
         void D(string key, double value) => b.Append(key).Append(" = ").AppendLine(value.ToString("0.###", CultureInfo.InvariantCulture));
         void B(string key, bool value) => b.Append(key).Append(" = ").AppendLine(value ? "true" : "false");
-        S("name", p.Name); S("description", p.Description);
+        S("name", p.Name); S("description", p.Description); B("favorite", p.Favorite);
         b.Append("tags = [").Append(string.Join(", ", p.Tags.Select(Toml.Quote))).AppendLine("]");
         if (!string.IsNullOrWhiteSpace(p.LlamaServer)) S("llama_server", p.LlamaServer);
         S("model", p.Model); B("vision", p.Vision); S("mmproj", p.Mmproj); I("image_min_tokens", p.ImageMinTokens);
