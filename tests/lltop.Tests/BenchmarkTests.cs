@@ -3,7 +3,7 @@ using Xunit;
 public sealed class BenchmarkTests
 {
     [Fact]
-    public void Generate_ProducesBaselineAndOneSettingAtATime()
+    public void Generate_ExcludesBaselineAndChangesOneSettingAtATime()
     {
         var baseline = new Profile { Name = "test", Ctx = 8192, Ngl = 20, Batch = 512, UBatch = 256, Parallel = 1 };
         var cases = BenchmarkCases.Generate(baseline,
@@ -12,21 +12,31 @@ public sealed class BenchmarkTests
             new BenchmarkSweep { Setting = "cache_k", Values = ["q4_0", "q8_0"] }
         ]);
 
-        Assert.Equal(4, cases.Count);
-        Assert.Equal("Baseline", cases[0].Label);
-        Assert.All(cases.Skip(1).Where(x => x.Setting != "ctx"), x => Assert.Equal(8192, x.Profile.Ctx));
+        Assert.Equal(3, cases.Count);
+        Assert.DoesNotContain(cases, x => x.Setting == "");
+        Assert.All(cases.Where(x => x.Setting != "ctx"), x => Assert.Equal(8192, x.Profile.Ctx));
         Assert.Contains(cases, x => x.Setting == "ctx" && x.Profile.Ctx == 4096);
         Assert.Contains(cases, x => x.Setting == "ctx" && x.Profile.Ctx == 12288);
         Assert.Contains(cases, x => x.Setting == "cache_k" && x.Profile.CacheK == "q8_0");
     }
 
     [Fact]
-    public void Generate_DeduplicatesRangeValuesAndBaselineValue()
+    public void Generate_SkipsRangeValuesMatchingTheBaseline()
     {
         var profile = new Profile { Name = "test", Ctx = 4, Ngl = 0, Batch = 1, UBatch = 1, Parallel = 1 };
         var cases = BenchmarkCases.Generate(profile, [new BenchmarkSweep { Setting = "ctx", Minimum = "4", Maximum = "4" }]);
 
-        Assert.Single(cases);
+        Assert.Empty(cases);
+    }
+
+    [Fact]
+    public void Generate_UsesTheRequestedNumberOfContextSteps()
+    {
+        var profile = new Profile { Name = "test", Ctx = 100, Ngl = 0, Batch = 1, UBatch = 1, Parallel = 1 };
+
+        var cases = BenchmarkCases.Generate(profile, [new BenchmarkSweep { Setting = "ctx", Minimum = "10", Maximum = "50", Steps = 5 }]);
+
+        Assert.Equal([10, 20, 30, 40, 50], cases.Select(x => x.Profile.Ctx));
     }
 
     [Fact]

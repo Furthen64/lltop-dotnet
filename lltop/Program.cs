@@ -1201,21 +1201,24 @@ static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
 static BenchmarkSetup? ShowBenchmarkSetup(IApplication app, Profile profile)
 {
     BenchmarkSetup? setup = null;
-    var dialog = new Window { Title = $" Benchmark setup · {profile.Name} ", Width = 92, Height = 17 };
+    var dialog = new Window { Title = $" Benchmark setup · {profile.Name} ", Width = 92, Height = 16 };
     dialog.KeyDown += (_, key) => { if (key.KeyCode == KeyCode.Esc) { app.RequestStop(); key.Handled = true; } };
-    dialog.Add(new Label { X = 2, Y = 1, Text = "Sweeps (one per line: ctx=4096:8192 or cache_k=q4_0,q8_0)" });
-#pragma warning disable CS0618
-    var sweeps = new TextView { X = 2, Y = 2, Width = Dim.Fill(4), Height = 5, Text = $"ctx={Math.Max(1, profile.Ctx / 2)}:{profile.Ctx * 2}" };
-#pragma warning restore CS0618
-    dialog.Add(sweeps);
-    dialog.Add(new Label { X = 2, Y = 8, Text = "Warmup prompt" });
-    var prompt = new TextField { X = 17, Y = 8, Width = Dim.Fill(4), Text = "Reply with a short benchmark acknowledgement." };
+    dialog.Add(new Label { X = 2, Y = 1, Text = "Context start" });
+    var startContext = new TextField { X = 16, Y = 1, Width = 10, Text = Math.Max(1, profile.Ctx / 2).ToString(CultureInfo.InvariantCulture) };
+    dialog.Add(new Label { X = 31, Y = 1, Text = "stop" });
+    var stopContext = new TextField { X = 37, Y = 1, Width = 10, Text = (profile.Ctx * 2).ToString(CultureInfo.InvariantCulture) };
+    dialog.Add(new Label { X = 52, Y = 1, Text = "steps" });
+    var contextSteps = new TextField { X = 59, Y = 1, Width = 5, Text = "5" };
+    dialog.Add(startContext, stopContext, contextSteps);
+    dialog.Add(new Label { X = 2, Y = 3, Text = "Steps include start and stop. The current profile is kept as a reference and is not run." });
+    dialog.Add(new Label { X = 2, Y = 5, Text = "Warmup prompt" });
+    var prompt = new TextField { X = 17, Y = 5, Width = Dim.Fill(4), Text = "Reply with a short benchmark acknowledgement." };
     dialog.Add(prompt);
-    dialog.Add(new Label { X = 2, Y = 10, Text = "Max tokens" });
-    var maxTokens = new TextField { X = 17, Y = 10, Width = 8, Text = "32" };
-    var continueOom = new CheckBox { X = 30, Y = 10, Text = "Continue after OOM" };
-    var message = new Label { X = 2, Y = 12, Width = Dim.Fill(4), Text = "Requires no active managed or external llama-server. Readiness timeout is 300 seconds." };
-    var start = new Button { X = 2, Y = 14, Text = "Start benchmark", IsDefault = true };
+    dialog.Add(new Label { X = 2, Y = 7, Text = "Max tokens" });
+    var maxTokens = new TextField { X = 17, Y = 7, Width = 8, Text = "32" };
+    var continueOom = new CheckBox { X = 30, Y = 7, Text = "Continue after OOM" };
+    var message = new Label { X = 2, Y = 9, Width = Dim.Fill(4), Text = "Requires no active managed or external llama-server. Readiness timeout is 300 seconds." };
+    var start = new Button { X = 2, Y = 12, Text = "Start benchmark", IsDefault = true };
     var cancel = new Button { X = Pos.Right(start) + 2, Y = 14, Text = "Cancel" };
     start.Accepting += (_, _) =>
     {
@@ -1224,8 +1227,15 @@ static BenchmarkSetup? ShowBenchmarkSetup(IApplication app, Profile profile)
             if (!int.TryParse(maxTokens.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var tokens)) throw new InvalidOperationException("Max tokens must be an integer.");
             var workload = new BenchmarkWorkload { Prompt = prompt.Text.Trim(), MaxTokens = tokens };
             workload.Validate();
-            setup = new(ParseBenchmarkSweeps(sweeps.Text), workload, continueOom.Value == CheckState.Checked ? BenchmarkOomPolicy.Continue : BenchmarkOomPolicy.Stop);
-            if (setup.Sweeps.Count == 0) throw new InvalidOperationException("Enter at least one sweep.");
+            if (!int.TryParse(startContext.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var minimum) || minimum < 1)
+                throw new InvalidOperationException("Context start must be a positive integer.");
+            if (!int.TryParse(stopContext.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var maximum) || maximum < minimum)
+                throw new InvalidOperationException("Context stop must be an integer no less than the start.");
+            if (!int.TryParse(contextSteps.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var steps) || steps < 2)
+                throw new InvalidOperationException("Context steps must be at least 2.");
+            setup = new([new BenchmarkSweep { Setting = "ctx", Minimum = minimum.ToString(CultureInfo.InvariantCulture), Maximum = maximum.ToString(CultureInfo.InvariantCulture), Steps = steps }], workload, continueOom.Value == CheckState.Checked ? BenchmarkOomPolicy.Continue : BenchmarkOomPolicy.Stop);
+            if (BenchmarkCases.Generate(profile, setup.Sweeps).Count == 0)
+                throw new InvalidOperationException("This context sweep only contains the current profile's context. Choose a different range or more steps.");
             app.RequestStop();
         }
         catch (Exception ex) { message.Text = ex.Message; }
@@ -1234,26 +1244,6 @@ static BenchmarkSetup? ShowBenchmarkSetup(IApplication app, Profile profile)
     dialog.Add(prompt, maxTokens, continueOom, message, start, cancel);
     app.Run(dialog);
     return setup;
-}
-
-static List<BenchmarkSweep> ParseBenchmarkSweeps(string text)
-{
-    var sweeps = new List<BenchmarkSweep>();
-    foreach (var raw in text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-    {
-        var equals = raw.IndexOf('=');
-        if (equals < 1) throw new InvalidOperationException($"Invalid sweep '{raw}'. Use setting=min:max or setting=value,value.");
-        var setting = raw[..equals].Trim();
-        var values = raw[(equals + 1)..].Trim();
-        if (values.Contains(':'))
-        {
-            var range = values.Split(':', StringSplitOptions.TrimEntries);
-            if (range.Length != 2) throw new InvalidOperationException($"Invalid range '{raw}'.");
-            sweeps.Add(new() { Setting = setting, Minimum = range[0], Maximum = range[1] });
-        }
-        else sweeps.Add(new() { Setting = setting, Values = values.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList() });
-    }
-    return sweeps;
 }
 
 static void ShowBenchmarkResults(IApplication app, BenchmarkRecord benchmark)

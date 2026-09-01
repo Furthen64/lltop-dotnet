@@ -28,6 +28,7 @@ internal sealed class BenchmarkSweep
     [JsonPropertyName("setting")] public string Setting { get; set; } = "";
     [JsonPropertyName("minimum")] public string Minimum { get; set; } = "";
     [JsonPropertyName("maximum")] public string Maximum { get; set; } = "";
+    [JsonPropertyName("steps")] public int Steps { get; set; }
     [JsonPropertyName("values")] public List<string> Values { get; set; } = [];
 
     public bool IsCategorical => Values.Count > 0;
@@ -87,7 +88,7 @@ internal static class BenchmarkCases
 
     public static List<BenchmarkCase> Generate(Profile baseline, IEnumerable<BenchmarkSweep> sweeps)
     {
-        var result = new List<BenchmarkCase> { Create("baseline", "Baseline", "", "", baseline.Copy(baseline.Name)) };
+        var result = new List<BenchmarkCase>();
         foreach (var sweep in sweeps)
         {
             var setting = sweep.Setting.Trim().ToLowerInvariant();
@@ -137,8 +138,11 @@ internal static class BenchmarkCases
             !int.TryParse(sweep.Maximum, NumberStyles.Integer, CultureInfo.InvariantCulture, out var maximum))
             throw new InvalidOperationException($"{setting} requires integer minimum and maximum values.");
         if (minimum > maximum) throw new InvalidOperationException($"{setting} minimum cannot exceed maximum.");
-        var middle = minimum + (maximum - minimum) / 2;
-        return new[] { minimum.ToString(CultureInfo.InvariantCulture), middle.ToString(CultureInfo.InvariantCulture), maximum.ToString(CultureInfo.InvariantCulture) }
+        var steps = sweep.Steps == 0 ? 3 : sweep.Steps;
+        if (steps < 2) throw new InvalidOperationException($"{setting} requires at least two steps.");
+        return Enumerable.Range(0, steps)
+            .Select(index => minimum + (int)Math.Round((maximum - minimum) * index / (double)(steps - 1), MidpointRounding.AwayFromZero))
+            .Select(value => value.ToString(CultureInfo.InvariantCulture))
             .Distinct(StringComparer.Ordinal).ToList();
     }
 
