@@ -14,7 +14,7 @@ public sealed class ProfileStoreTests : IDisposable
             TopP = .83, MinP = .02, UBatch = 128, FlashAttn = "on", NoMmap = false,
             Vision = true, Mmproj = "/models/mmproj-BF16.gguf",
             RepeatPenalty = 1.15, RepeatLastN = 128, PresencePenalty = .2, FrequencyPenalty = .3,
-            ReasoningBudget = 2048, SpecType = "draft-mtp", SpecDraftNMax = 3, ImageMinTokens = 1024, ExtraArgs = ["--verbose", "--log-colors", "value with spaces"],
+            ReasoningBudget = 2048, Mtp = true, MtpDraftTokens = 3, ImageMinTokens = 1024, ExtraArgs = ["--verbose", "--log-colors", "value with spaces"],
             Tags = ["fast", "coding model"], Favorite = true
         };
 
@@ -37,12 +37,24 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.True(loaded.Vision);
         Assert.Equal(original.Mmproj, loaded.Mmproj);
         Assert.Equal(2048, loaded.ReasoningBudget);
-        Assert.Equal("draft-mtp", loaded.SpecType);
-        Assert.Equal(3, loaded.SpecDraftNMax);
+        Assert.True(loaded.Mtp);
+        Assert.Equal(3, loaded.MtpDraftTokens);
         Assert.Equal(1024, loaded.ImageMinTokens);
         Assert.Equal(original.ExtraArgs, loaded.ExtraArgs);
         Assert.Equal(["fast", "coding model"], loaded.Tags);
         Assert.True(loaded.Favorite);
+    }
+
+    [Fact]
+    public void LoadAll_MigratesLegacyMtpSettings()
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "legacy.toml"), "name = \"legacy\"\nspec_type = \"draft-mtp\"\nspec_draft_n_max = 4\n");
+
+        var profile = Assert.Single(new ProfileStore(directory).LoadAll().Profiles);
+
+        Assert.True(profile.Mtp);
+        Assert.Equal(4, profile.MtpDraftTokens);
     }
 
     [Fact]

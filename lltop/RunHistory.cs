@@ -30,8 +30,8 @@ internal sealed class RunRecord
     [JsonPropertyName("parallel")] public int Parallel { get; set; }
     [JsonPropertyName("reasoning")] public string Reasoning { get; set; } = "";
     [JsonPropertyName("reasoning_budget")] public int ReasoningBudget { get; set; }
-    [JsonPropertyName("spec_type")] public string SpecType { get; set; } = "";
-    [JsonPropertyName("spec_draft_n_max")] public int SpecDraftNMax { get; set; }
+    [JsonPropertyName("mtp")] public bool Mtp { get; set; }
+    [JsonPropertyName("mtp_draft_tokens")] public int MtpDraftTokens { get; set; }
     [JsonPropertyName("no_mmap")] public bool NoMmap { get; set; }
     [JsonPropertyName("extra_args")] public List<string> ExtraArgs { get; set; } = [];
     [JsonPropertyName("last_prompt_tokens_per_second")] public double PromptTokensPerSecond { get; set; }
@@ -54,7 +54,7 @@ internal sealed class RunRecord
         StartedAt = started, EndedAt = ended, DurationSeconds = Math.Max(0, (ended - started).TotalSeconds),
         ExitCode = exitCode, ExitReason = reason, GeneratedCommand = command, LogPath = logPath, GraphDataPath = graphDataPath,
         Model = p.Model, Ctx = p.Ctx, Ngl = p.Ngl, CacheK = p.CacheK, CacheV = p.CacheV, Batch = p.Batch, UBatch = p.UBatch,
-        Parallel = p.Parallel, Reasoning = p.Reasoning, ReasoningBudget = p.ReasoningBudget, SpecType = p.SpecType, SpecDraftNMax = p.SpecDraftNMax, NoMmap = p.NoMmap, ExtraArgs = [.. p.ExtraArgs],
+        Parallel = p.Parallel, Reasoning = p.Reasoning, ReasoningBudget = p.ReasoningBudget, Mtp = p.Mtp, MtpDraftTokens = p.MtpDraftTokens, NoMmap = p.NoMmap, ExtraArgs = [.. p.ExtraArgs],
         PromptTokensPerSecond = stats.PromptTokensPerSecond, EvalTokensPerSecond = stats.EvalTokensPerSecond,
         GeneratedTokens = stats.GeneratedTokens, PromptTokens = stats.PromptTokens,
         OffloadedLayers = stats.OffloadedLayers, TotalLayers = stats.TotalLayers,
@@ -130,5 +130,5 @@ internal static class RunHistory
     public static bool HasRunForScenario(string directory, Profile p) =>
         Load(directory).Any(x => SameScenario(x.Record, p));
 
-    static bool SameScenario(RunRecord s, Profile p) => s.Model == p.Model && s.Ctx == p.Ctx && s.Ngl == p.Ngl && s.CacheK == p.CacheK && s.CacheV == p.CacheV && s.Batch == p.Batch && s.UBatch == p.UBatch && s.Parallel == p.Parallel && s.Reasoning == p.Reasoning && s.ReasoningBudget == p.ReasoningBudget && s.SpecType == p.SpecType && s.SpecDraftNMax == p.SpecDraftNMax && s.NoMmap == p.NoMmap && (s.ExtraArgs ?? []).SequenceEqual(p.ExtraArgs);
+    static bool SameScenario(RunRecord s, Profile p) => s.Model == p.Model && s.Ctx == p.Ctx && s.Ngl == p.Ngl && s.CacheK == p.CacheK && s.CacheV == p.CacheV && s.Batch == p.Batch && s.UBatch == p.UBatch && s.Parallel == p.Parallel && s.Reasoning == p.Reasoning && s.ReasoningBudget == p.ReasoningBudget && s.Mtp == p.Mtp && (!p.Mtp || s.MtpDraftTokens == p.MtpDraftTokens) && s.NoMmap == p.NoMmap && (s.ExtraArgs ?? []).SequenceEqual(p.ExtraArgs);
 }

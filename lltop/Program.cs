@@ -200,7 +200,7 @@ void UpdateStatus(string message = "")
         $"{state}{pid}{uptime}  ·  {p.Name}  ·  {p.Host}:{p.Port}",
         $"Model     {model}{(modelSize.Length == 0 ? "" : $"  ·  {modelSize}")}",
         $"Launch    ctx {p.Ctx:N0}  ·  GPU layers {p.Ngl}  ·  parallel {p.Parallel}  ·  FA {p.FlashAttn}" +
-        (string.IsNullOrWhiteSpace(p.SpecType) ? "" : $"  ·  MTP {p.SpecDraftNMax}"),
+        (p.Mtp ? $"  ·  MTP {p.MtpDraftTokens}" : ""),
         $"Vision    {vision}",
         $"Device    {device}",
         $"Server    {server}",
@@ -963,7 +963,7 @@ static bool EditProfile(IApplication app, Profile profile, string title)
     Field("Presence penalty", profile.PresencePenalty.ToString(CultureInfo.InvariantCulture), 37); Field("Frequency penalty", profile.FrequencyPenalty.ToString(CultureInfo.InvariantCulture), 37, 49);
     Field("Batch", profile.Batch.ToString(), 40); Field("Micro batch", profile.UBatch.ToString(), 40, 49);
     Field("Chat template", profile.ChatTemplate, 43); Field("Reasoning / budget", $"{profile.Reasoning} {profile.ReasoningBudget}", 43, 49);
-    Field("MTP spec type (blank/draft-mtp)", profile.SpecType, 46); Field("MTP max draft tokens", profile.SpecDraftNMax.ToString(), 46, 49);
+    Field("MTP (on/off)", profile.Mtp ? "on" : "off", 46); Field("MTP draft tokens", profile.MtpDraftTokens.ToString(), 46, 49);
     Field("Image min tokens (0 = default)", profile.ImageMinTokens.ToString(), 49); Field("Context checkpoints", profile.CtxCheckpoints.ToString(), 49, 49);
     Field("Extra args (quoted when needed)", ArgumentText.Format(profile.ExtraArgs), 52, 2, 90);
     Field("Tags (comma separated, shown in the profile list)", string.Join(", ", profile.Tags), 54, 2, 90);
@@ -1010,8 +1010,8 @@ static bool EditProfile(IApplication app, Profile profile, string title)
             profile.Batch = ParseInt(T("Batch"), "Batch"); profile.UBatch = ParseInt(T("Micro batch"), "Micro batch");
             profile.ImageMinTokens = ParseInt(T("Image min tokens (0 = default)"), "Image minimum tokens");
             profile.CtxCheckpoints = ParseInt(T("Context checkpoints"), "Context checkpoints");
-            profile.SpecType = T("MTP spec type (blank/draft-mtp)").Trim().ToLowerInvariant();
-            profile.SpecDraftNMax = ParseInt(T("MTP max draft tokens"), "MTP maximum draft tokens");
+            profile.Mtp = ParseOnOff(T("MTP (on/off)"), "MTP");
+            profile.MtpDraftTokens = ParseInt(T("MTP draft tokens"), "MTP draft tokens");
             profile.ChatTemplate = T("Chat template").Trim();
             var reasoning = T("Reasoning / budget").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             profile.Reasoning = reasoning.FirstOrDefault() ?? "auto"; profile.ReasoningBudget = reasoning.Length > 1 ? ParseInt(reasoning[1], "Reasoning budget") : -1;
@@ -1028,6 +1028,12 @@ static bool EditProfile(IApplication app, Profile profile, string title)
 }
 
 static int ParseInt(string value, string name) => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : throw new FormatException($"{name} must be a whole number.");
+static bool ParseOnOff(string value, string name) => value.Trim().ToLowerInvariant() switch
+{
+    "on" => true,
+    "off" => false,
+    _ => throw new FormatException($"{name} must be on or off.")
+};
 static double ParseDouble(string value, string name) => double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : throw new FormatException($"{name} must be a number.");
 static string CompactModelSize(string path)
 {

@@ -39,8 +39,11 @@ sealed class Profile
     public string ChatTemplate { get; set; } = "";
     public string Reasoning { get; set; } = "auto";
     public int ReasoningBudget { get; set; } = -1;
+    public bool Mtp { get; set; }
+    public int MtpDraftTokens { get; set; }
+    // Read legacy speculative-decoding keys so existing profiles migrate on their next save.
     public string SpecType { get; set; } = "";
-    public int SpecDraftNMax { get; set; } = 3;
+    public int SpecDraftNMax { get; set; }
     public List<string> ExtraArgs { get; set; } = [];
     public string SourcePath { get; set; } = "";
 
@@ -63,7 +66,7 @@ sealed class Profile
         Batch = Batch, UBatch = UBatch, Parallel = Parallel, CtxCheckpoints = CtxCheckpoints, Threads = Threads,
         FlashAttn = FlashAttn, Jinja = Jinja, Metrics = Metrics, NoMmap = NoMmap,
         ChatTemplate = ChatTemplate, Reasoning = Reasoning, ReasoningBudget = ReasoningBudget,
-        SpecType = SpecType, SpecDraftNMax = SpecDraftNMax,
+        Mtp = Mtp, MtpDraftTokens = MtpDraftTokens,
         ExtraArgs = [.. ExtraArgs], SourcePath = SourcePath
     };
 
@@ -76,9 +79,7 @@ sealed class Profile
         if (!new[] { "", "auto", "on", "off" }.Contains(Reasoning, StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException("Reasoning must be auto, on, or off.");
         if (ReasoningBudget < -1) throw new InvalidOperationException("Reasoning budget must be -1 or greater.");
-        if (!new[] { "", "draft-mtp" }.Contains(SpecType, StringComparer.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Speculative decoding type must be draft-mtp or blank.");
-        if (SpecDraftNMax < 1) throw new InvalidOperationException("MTP maximum draft tokens must be at least 1.");
+        if (Mtp && MtpDraftTokens < 1) throw new InvalidOperationException("MTP draft tokens must be at least 1 when MTP is on.");
         if (RepeatPenalty < 0) throw new InvalidOperationException("Repeat penalty cannot be negative.");
         if (RepeatLastN < -1) throw new InvalidOperationException("Repeat last N must be -1 or greater.");
         if (ImageMinTokens < 0) throw new InvalidOperationException("Image minimum tokens cannot be negative.");
@@ -120,6 +121,7 @@ sealed class ProfileStore(string directory)
             {
                 var profile = new Profile();
                 Toml.ReadInto(path, profile);
+                MigrateLegacyMtpSettings(profile);
                 if (string.IsNullOrWhiteSpace(profile.Name)) profile.Name = Path.GetFileNameWithoutExtension(path);
                 profile.Model = AppConfig.Expand(profile.Model);
                 profile.Mmproj = AppConfig.Expand(profile.Mmproj);
@@ -193,9 +195,20 @@ sealed class ProfileStore(string directory)
         I("batch", p.Batch); I("ubatch", p.UBatch); I("parallel", p.Parallel); I("ctx_checkpoints", p.CtxCheckpoints); I("threads", p.Threads);
         S("flash_attn", p.FlashAttn); B("jinja", p.Jinja); B("metrics", p.Metrics); B("no_mmap", p.NoMmap);
         S("chat_template", p.ChatTemplate); S("reasoning", p.Reasoning); I("reasoning_budget", p.ReasoningBudget);
-        S("spec_type", p.SpecType); I("spec_draft_n_max", p.SpecDraftNMax);
+        B("mtp", p.Mtp); I("mtp_draft_tokens", p.MtpDraftTokens);
         b.Append("extra_args = [").Append(string.Join(", ", p.ExtraArgs.Select(Toml.Quote))).AppendLine("]");
         return b.ToString();
+    }
+
+    static void MigrateLegacyMtpSettings(Profile profile)
+    {
+        if (string.IsNullOrWhiteSpace(profile.SpecType)) return;
+        if (!profile.SpecType.Equals("draft-mtp", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Legacy speculative decoding type must be draft-mtp.");
+        profile.Mtp = true;
+        if (profile.SpecDraftNMax > 0) profile.MtpDraftTokens = profile.SpecDraftNMax;
+        profile.SpecType = "";
+        profile.SpecDraftNMax = 0;
     }
 }
 

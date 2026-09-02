@@ -215,9 +215,11 @@ sealed class ServerRunner : IDisposable
         Flag("--jinja", p.Jinja, "jinja");
         Pair("--reasoning", p.Reasoning, "reasoning");
         segments.Add(new(["--reasoning-budget", p.ReasoningBudget.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "reasoning budget"));
-        Pair("--spec-type", p.SpecType, "speculative decoding type");
-        if (!string.IsNullOrWhiteSpace(p.SpecType))
-            segments.Add(new(["--spec-draft-n-max", p.SpecDraftNMax.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "MTP maximum draft tokens"));
+        if (p.Mtp)
+        {
+            segments.Add(new(["--spec-type", "draft-mtp"], LaunchArgumentOrigin.Generated, "MTP"));
+            segments.Add(new(["--spec-draft-n-max", p.MtpDraftTokens.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "MTP draft tokens"));
+        }
         Flag("--no-mmap", p.NoMmap, "mmap");
         Pair("--chat-template", p.ChatTemplate, "chat template");
         segments.AddRange(ParseExtraArgumentSegments(FilterExtraArguments(p.ExtraArgs), capabilities));

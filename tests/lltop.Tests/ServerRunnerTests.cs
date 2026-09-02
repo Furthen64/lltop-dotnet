@@ -50,7 +50,7 @@ public sealed class ServerRunnerTests
     {
         var profile = new Profile
         {
-            Model = "/models/Qwen3.8-27B-Q6_K.gguf", SpecType = "draft-mtp", SpecDraftNMax = 3,
+            Model = "/models/Qwen3.8-27B-Q6_K.gguf", Mtp = true, MtpDraftTokens = 3,
             ExtraArgs = ["--spec-type", "other", "--spec-draft-n-max=5"]
         };
 
@@ -62,6 +62,16 @@ public sealed class ServerRunnerTests
         Assert.Equal("3", args[args.IndexOf("--spec-draft-n-max") + 1]);
         Assert.DoesNotContain("other", args);
         Assert.DoesNotContain("--spec-draft-n-max=5", args);
+    }
+
+    [Fact]
+    public void Defaults_LeaveMtpOffWithZeroDraftTokens()
+    {
+        var profile = new Profile { Name = "default" };
+
+        Assert.False(profile.Mtp);
+        Assert.Equal(0, profile.MtpDraftTokens);
+        profile.Validate();
     }
 
     [Fact]
