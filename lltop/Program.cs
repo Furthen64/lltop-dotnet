@@ -61,7 +61,7 @@ var metricsFrame = new FrameView { Title = " Metrics ", X = Pos.Right(statusFram
 var metrics = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(), Text = "Waiting for the first request…" };
 metricsFrame.Add(metrics);
 var help = new Label { X = 1, Y = Pos.Bottom(statusFrame), Width = Dim.Fill(2), Height = 3,
-    Text = "[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [Ctrl+F] Favorite\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [h/?] All keys   [q] Quit" };
+    Text = "[Enter] Start   [e] Edit   [F2] Editor v2   [d] Duplicate   [x] Delete   [n] New   [Ctrl+F] Favorite\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [h/?] All keys   [q] Quit" };
 var resourceStrip = new ResourceStripView { X = 1, Y = Pos.Bottom(help), Width = Dim.Fill(2) };
 win.Add(banner, profileFrame, logFrame, statusFrame, metricsFrame, help, resourceStrip);
 LltopTheme.Apply([profileFrame, logFrame, statusFrame, metricsFrame], banner, profileList, logView, status, metrics, help, logStatus);
@@ -83,8 +83,8 @@ void ApplyLayout()
     var helpHeight = expandedHelp ? 6 : 2;
     help.Height = helpHeight;
     help.Text = expandedHelp
-        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+F] Favorite/unfavorite   [Ctrl+R/F5] Find models\nBENCHMARK   [b] Setup/start   [B] Cancel   idle server required   reports → benchmarks_dir\nLOG & RUNS  [g] Resource graph   [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nTHEME       [t] Cycle theme ({LltopTheme.CurrentName})   [h/?] Show fewer keys"
-        : $"[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [Ctrl+F] Favorite\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [t] Theme: {LltopTheme.CurrentName}   [h/?] All keys   [q] Quit";
+        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit v1   [F2] Edit v2 (experimental)   [d] Duplicate   [x] Delete   [Ctrl+F] Favorite/unfavorite   [Ctrl+R/F5] Find models\nBENCHMARK   [b] Setup/start   [B] Cancel   idle server required   reports → benchmarks_dir\nLOG & RUNS  [g] Resource graph   [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nTHEME       [t] Cycle theme ({LltopTheme.CurrentName})   [h/?] Show fewer keys"
+        : $"[Enter] Start   [e] Edit   [F2] Editor v2   [d] Duplicate   [x] Delete   [n] New   [Ctrl+F] Favorite\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [t] Theme: {LltopTheme.CurrentName}   [h/?] All keys   [q] Quit";
     var narrow = win.Viewport.Width is > 0 and < 84;
     var reserved = (narrow ? 20 : 10) + helpHeight + 1;
     if (narrow)
@@ -681,6 +681,15 @@ void EditSelected()
     catch (Exception ex) { UpdateStatus(ex.Message); }
 }
 
+void EditSelectedV2()
+{
+    var p = SelectedProfile(); if (p is null) { UpdateStatus("No profile selected."); return; }
+    var edited = p.Copy(p.Name);
+    if (!EditProfileV2(app, edited, "Edit profile v2 · experimental")) return;
+    try { store.Save(edited); ReloadProfiles(edited.Name, $"Saved {edited.Name} with editor v2."); }
+    catch (Exception ex) { UpdateStatus(ex.Message); }
+}
+
 void DuplicateSelected()
 {
     var source = SelectedProfile(); if (source is null) { UpdateStatus("No profile selected."); return; }
@@ -828,6 +837,7 @@ app.Keyboard.KeyDown += (_, key) =>
     else if (text.Equals("r", StringComparison.OrdinalIgnoreCase)) { _ = Launch(true); key.Handled = true; }
     else if (text == "n") { NewProfile(); key.Handled = true; }
     else if (text.Equals("e", StringComparison.OrdinalIgnoreCase)) { EditSelected(); key.Handled = true; }
+    else if (key.KeyCode == KeyCode.F2) { EditSelectedV2(); key.Handled = true; }
     else if (text.Equals("d", StringComparison.OrdinalIgnoreCase)) { DuplicateSelected(); key.Handled = true; }
     else if (text.Equals("x", StringComparison.OrdinalIgnoreCase)) { DeleteSelected(); key.Handled = true; }
     else if (text.Equals("p", StringComparison.OrdinalIgnoreCase))
@@ -933,6 +943,93 @@ _ = Task.Run(async () => { await Task.Delay(50); app.Invoke(() => RefreshProfile
 app.Run(win);
 monitorCancellation.Cancel();
 runner.Dispose();
+
+static bool EditProfileV2(IApplication app, Profile profile, string title)
+{
+    var dialog = new Window { Title = $" {title} ", X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+    var fields = new Dictionary<string, TextField>();
+    TextField Field(View page, string key, string label, string value, int x, int y, int width)
+    {
+        page.Add(new Label { X = x, Y = y, Text = label });
+        var field = new TextField { X = x + label.Length + 1, Y = y, Width = width, Text = value };
+        page.Add(field); fields[key] = field; return field;
+    }
+    string T(string key) => fields[key].Text;
+
+    var tabs = new Tabs { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(3) };
+    var general = new View { Title = " General " };
+    var flash = new View { Title = " Flash-attn " };
+    var mtpPage = new View { Title = " MTP " };
+    tabs.Add(general, flash, mtpPage);
+    dialog.Add(tabs);
+
+    general.Add(new Label { X = 2, Y = 1, Text = "Model, server, sampling, template, vision, and metadata" });
+    var name = Field(general, "name", "Name", profile.Name, 2, 3, 30);
+    Field(general, "description", "Description", profile.Description, 46, 3, 38);
+    Field(general, "model", "Model", profile.Model, 2, 5, 86);
+    Field(general, "server", "Server", profile.LlamaServer, 2, 7, 34);
+    Field(general, "alias", "Alias", profile.Alias, 50, 7, 30);
+    Field(general, "host", "Host", profile.Host, 2, 9, 16); Field(general, "port", "Port", profile.Port.ToString(), 29, 9, 6);
+    Field(general, "ctx", "Context", profile.Ctx.ToString(), 46, 9, 8); Field(general, "ngl", "GPU layers", profile.Ngl.ToString(), 67, 9, 5);
+    Field(general, "template", "Template", profile.ChatTemplate, 2, 11, 25); Field(general, "reasoning", "Reasoning", profile.Reasoning, 41, 11, 9); Field(general, "budget", "Budget", profile.ReasoningBudget.ToString(), 64, 11, 7);
+    Field(general, "temp", "Temperature", profile.Temp.ToString(CultureInfo.InvariantCulture), 2, 13, 7); Field(general, "topP", "Top-P", profile.TopP.ToString(CultureInfo.InvariantCulture), 25, 13, 7); Field(general, "topK", "Top-K", profile.TopK.ToString(), 43, 13, 7); Field(general, "minP", "Min-P", profile.MinP.ToString(CultureInfo.InvariantCulture), 61, 13, 7);
+    Field(general, "repeatPenalty", "Repeat penalty", profile.RepeatPenalty.ToString(CultureInfo.InvariantCulture), 2, 15, 7); Field(general, "repeatLastN", "Repeat last N", profile.RepeatLastN.ToString(), 30, 15, 7); Field(general, "presence", "Presence", profile.PresencePenalty.ToString(CultureInfo.InvariantCulture), 54, 15, 7); Field(general, "frequency", "Frequency", profile.FrequencyPenalty.ToString(CultureInfo.InvariantCulture), 74, 15, 7);
+    var mmproj = Field(general, "mmproj", "Vision projector", profile.Mmproj, 2, 17, 65);
+    var findMmproj = new Button { X = 83, Y = 17, Text = "Find sibling" };
+    general.Add(findMmproj);
+    Field(general, "imageTokens", "Image min tokens", profile.ImageMinTokens.ToString(), 2, 19, 7);
+    Field(general, "extra", "Extra args", ArgumentText.Format(profile.ExtraArgs), 2, 21, 81);
+    Field(general, "tags", "Tags", string.Join(", ", profile.Tags), 2, 23, 87);
+    var vision = new CheckBox { X = 2, Y = 25, Text = "Use vision", Value = profile.Vision ? CheckState.Checked : CheckState.UnChecked };
+    var jinja = new CheckBox { X = 20, Y = 25, Text = "Jinja", Value = profile.Jinja ? CheckState.Checked : CheckState.UnChecked };
+    var metrics = new CheckBox { X = 34, Y = 25, Text = "Metrics", Value = profile.Metrics ? CheckState.Checked : CheckState.UnChecked };
+    var mmap = new CheckBox { X = 50, Y = 25, Text = "Disable mmap", Value = profile.NoMmap ? CheckState.Checked : CheckState.UnChecked };
+    general.Add(vision, jinja, metrics, mmap);
+
+    flash.Add(new Label { X = 2, Y = 1, Text = "Attention, KV cache, and server batching" });
+    Field(flash, "flash", "Flash attention (auto/on/off)", profile.FlashAttn, 2, 4, 10);
+    Field(flash, "cacheK", "KV cache K", profile.CacheK, 2, 6, 12); Field(flash, "cacheV", "KV cache V", profile.CacheV, 33, 6, 12);
+    Field(flash, "batch", "Batch", profile.Batch.ToString(), 2, 9, 8); Field(flash, "ubatch", "Micro batch", profile.UBatch.ToString(), 24, 9, 8); Field(flash, "parallel", "Parallel slots", profile.Parallel.ToString(), 49, 9, 6); Field(flash, "threads", "CPU threads", profile.Threads.ToString(), 72, 9, 6);
+    Field(flash, "checkpoints", "Context checkpoints", profile.CtxCheckpoints.ToString(), 2, 12, 6);
+    flash.Add(new Label { X = 2, Y = 15, Text = "Blank cache or flash values leave the matching llama.cpp option out of the launch command." });
+
+    mtpPage.Add(new Label { X = 2, Y = 1, Text = "Multi-token prediction / draft-MTP" });
+    Field(mtpPage, "mtp", "MTP (on/off)", profile.Mtp ? "on" : "off", 2, 4, 7);
+    Field(mtpPage, "mtpTokens", "Draft tokens", profile.MtpDraftTokens.ToString(), 2, 6, 7);
+    mtpPage.Add(new Label { X = 2, Y = 9, Text = "When on, lltop adds: --spec-type draft-mtp --spec-draft-n-max <draft tokens>" });
+    mtpPage.Add(new Label { X = 2, Y = 11, Text = "When off, draft tokens should be 0. When on, draft tokens must be at least 1." });
+
+    var message = new Label { X = 2, Y = Pos.AnchorEnd(1), Width = Dim.Fill(28), Text = "F2 editor v2 · select a tab with its header, Ctrl+Tab, or Ctrl+PageUp/PageDown." };
+    var save = new Button { X = Pos.AnchorEnd(18), Y = Pos.AnchorEnd(1), Text = "Save", IsDefault = true };
+    var cancel = new Button { X = Pos.Right(save) + 1, Y = Pos.AnchorEnd(1), Text = "Cancel" };
+    dialog.Add(message, save, cancel);
+    var accepted = false;
+    findMmproj.Accepting += (_, _) =>
+    {
+        var match = VisionProjectorResolver.FindBeside(AppConfig.Expand(T("model")));
+        if (match.Path is not null) mmproj.Text = match.Path;
+        message.Text = match.Message;
+    };
+    save.Accepting += (_, _) =>
+    {
+        try
+        {
+            profile.Name = name.Text.Trim(); profile.Description = T("description").Trim(); profile.Model = AppConfig.Expand(T("model")); profile.LlamaServer = AppConfig.Expand(T("server")); profile.Alias = T("alias").Trim(); profile.Host = T("host").Trim(); profile.Port = ParseInt(T("port"), "Port");
+            profile.Ctx = ParseInt(T("ctx"), "Context"); profile.Ngl = ParseInt(T("ngl"), "GPU layers"); profile.ChatTemplate = T("template").Trim(); profile.Reasoning = T("reasoning").Trim().ToLowerInvariant(); profile.ReasoningBudget = ParseInt(T("budget"), "Reasoning budget");
+            profile.Temp = ParseDouble(T("temp"), "Temperature"); profile.TopP = ParseDouble(T("topP"), "Top P"); profile.TopK = ParseInt(T("topK"), "Top K"); profile.MinP = ParseDouble(T("minP"), "Min P"); profile.RepeatPenalty = ParseDouble(T("repeatPenalty"), "Repeat penalty"); profile.RepeatLastN = ParseInt(T("repeatLastN"), "Repeat last N"); profile.PresencePenalty = ParseDouble(T("presence"), "Presence penalty"); profile.FrequencyPenalty = ParseDouble(T("frequency"), "Frequency penalty");
+            profile.Vision = vision.Value == CheckState.Checked; profile.Mmproj = AppConfig.Expand(T("mmproj")); profile.ImageMinTokens = ParseInt(T("imageTokens"), "Image minimum tokens");
+            if (profile.Vision && string.IsNullOrWhiteSpace(profile.Mmproj)) { var match = VisionProjectorResolver.FindBeside(profile.Model); if (match.Path is null) throw new InvalidOperationException(match.Message); profile.Mmproj = match.Path; }
+            profile.ExtraArgs = ArgumentText.Parse(T("extra")); profile.Tags = T("tags").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(); profile.Jinja = jinja.Value == CheckState.Checked; profile.Metrics = metrics.Value == CheckState.Checked; profile.NoMmap = mmap.Value == CheckState.Checked;
+            profile.FlashAttn = T("flash").Trim().ToLowerInvariant(); profile.CacheK = T("cacheK").Trim(); profile.CacheV = T("cacheV").Trim(); profile.Batch = ParseInt(T("batch"), "Batch"); profile.UBatch = ParseInt(T("ubatch"), "Micro batch"); profile.Parallel = ParseInt(T("parallel"), "Parallel slots"); profile.Threads = ParseInt(T("threads"), "CPU threads"); profile.CtxCheckpoints = ParseInt(T("checkpoints"), "Context checkpoints");
+            profile.Mtp = ParseOnOff(T("mtp"), "MTP"); profile.MtpDraftTokens = ParseInt(T("mtpTokens"), "MTP draft tokens");
+            profile.Validate(); accepted = true; app.RequestStop();
+        }
+        catch (Exception ex) { message.Text = ex.Message; }
+    };
+    cancel.Accepting += (_, _) => app.RequestStop();
+    app.Run(dialog);
+    return accepted;
+}
 
 static bool EditProfile(IApplication app, Profile profile, string title)
 {
