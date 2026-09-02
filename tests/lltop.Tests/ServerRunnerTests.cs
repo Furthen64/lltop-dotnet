@@ -46,6 +46,25 @@ public sealed class ServerRunnerTests
     }
 
     [Fact]
+    public void BuildArguments_AddsMtpSpeculationFlagsAndFiltersManualConflicts()
+    {
+        var profile = new Profile
+        {
+            Model = "/models/Qwen3.8-27B-Q6_K.gguf", SpecType = "draft-mtp", SpecDraftNMax = 3,
+            ExtraArgs = ["--spec-type", "other", "--spec-draft-n-max=5"]
+        };
+
+        var args = ServerRunner.BuildArguments(profile).ToList();
+
+        Assert.Equal(1, args.Count(x => x == "--spec-type"));
+        Assert.Equal("draft-mtp", args[args.IndexOf("--spec-type") + 1]);
+        Assert.Equal(1, args.Count(x => x == "--spec-draft-n-max"));
+        Assert.Equal("3", args[args.IndexOf("--spec-draft-n-max") + 1]);
+        Assert.DoesNotContain("other", args);
+        Assert.DoesNotContain("--spec-draft-n-max=5", args);
+    }
+
+    [Fact]
     public void Validate_VisionRequiresSupportedQwenFamilyAndProjectorName()
     {
         var profile = new Profile { Name = "vision", Model = "/models/qwen.gguf", Vision = true, Mmproj = "/models/mmproj-BF16.gguf" };

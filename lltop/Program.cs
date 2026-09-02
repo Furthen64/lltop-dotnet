@@ -18,6 +18,7 @@ var removedLegacyStarter = FirstRunProfiles.RemoveLegacyStarter(cfg);
 var load = store.LoadAll();
 var profiles = load.Profiles;
 var selected = Math.Max(0, profiles.FindIndex(p => p.Name.Equals(cfg.DefaultProfile, StringComparison.OrdinalIgnoreCase)));
+var selectedProfileListItem = 0;
 var runner = new ServerRunner();
 var capabilityCache = new ServerCapabilityCache(Path.Combine(Path.GetDirectoryName(AppConfig.ConfigPath) ?? cfg.LogsDir, "server-capabilities.json"));
 var runningProfile = "";
@@ -138,7 +139,8 @@ void RefreshProfileItems(string? selectName = null)
     {
         var match = selectName is null ? -1 : profiles.FindIndex(p => p.Name.Equals(selectName, StringComparison.OrdinalIgnoreCase));
         selected = Math.Clamp(match >= 0 ? match : selected, 0, profiles.Count - 1);
-        profileList.SelectedItem = selected + (profiles.Take(selected).Any(p => !p.Favorite) && profiles.Any(p => p.Favorite) ? 1 : 0);
+        selectedProfileListItem = UiText.ProfileListItem(selected, profiles.Count, profiles.Count(p => p.Favorite));
+        profileList.SelectedItem = selectedProfileListItem;
     }
 }
 
@@ -197,7 +199,8 @@ void UpdateStatus(string message = "")
     {
         $"{state}{pid}{uptime}  ·  {p.Name}  ·  {p.Host}:{p.Port}",
         $"Model     {model}{(modelSize.Length == 0 ? "" : $"  ·  {modelSize}")}",
-        $"Launch    ctx {p.Ctx:N0}  ·  GPU layers {p.Ngl}  ·  parallel {p.Parallel}  ·  FA {p.FlashAttn}",
+        $"Launch    ctx {p.Ctx:N0}  ·  GPU layers {p.Ngl}  ·  parallel {p.Parallel}  ·  FA {p.FlashAttn}" +
+        (string.IsNullOrWhiteSpace(p.SpecType) ? "" : $"  ·  MTP {p.SpecDraftNMax}"),
         $"Vision    {vision}",
         $"Device    {device}",
         $"Server    {server}",
@@ -757,11 +760,13 @@ profileList.ValueChanged += (_, _) =>
     if (profileList.SelectedItem is int value && profiles.Count > 0)
     {
         var favoriteCount = profiles.Count(p => p.Favorite);
-        if (favoriteCount > 0 && favoriteCount < profiles.Count && value == favoriteCount)
+        var visibleItem = UiText.SkipFavoritesDivider(value, selectedProfileListItem, profiles.Count, favoriteCount);
+        if (visibleItem != value)
         {
-            profileList.SelectedItem = value + 1;
+            profileList.SelectedItem = visibleItem;
             return;
         }
+        selectedProfileListItem = value;
         selected = Math.Clamp(value - (favoriteCount > 0 && value > favoriteCount ? 1 : 0), 0, profiles.Count - 1);
     }
     RefreshLogs(); UpdateStatus();
@@ -931,7 +936,7 @@ runner.Dispose();
 
 static bool EditProfile(IApplication app, Profile profile, string title)
 {
-    var dialog = new Window { Title = $" {title} ", Width = 96, Height = 57 };
+    var dialog = new Window { Title = $" {title} ", Width = 96, Height = 60 };
     var fields = new Dictionary<string, TextField>();
     TextField Field(string label, string value, int y, int x = 2, int width = 42)
     {
@@ -958,17 +963,18 @@ static bool EditProfile(IApplication app, Profile profile, string title)
     Field("Presence penalty", profile.PresencePenalty.ToString(CultureInfo.InvariantCulture), 37); Field("Frequency penalty", profile.FrequencyPenalty.ToString(CultureInfo.InvariantCulture), 37, 49);
     Field("Batch", profile.Batch.ToString(), 40); Field("Micro batch", profile.UBatch.ToString(), 40, 49);
     Field("Chat template", profile.ChatTemplate, 43); Field("Reasoning / budget", $"{profile.Reasoning} {profile.ReasoningBudget}", 43, 49);
-    Field("Image min tokens (0 = default)", profile.ImageMinTokens.ToString(), 46); Field("Context checkpoints", profile.CtxCheckpoints.ToString(), 46, 49);
-    Field("Extra args (quoted when needed)", ArgumentText.Format(profile.ExtraArgs), 49, 2, 90);
-    Field("Tags (comma separated, shown in the profile list)", string.Join(", ", profile.Tags), 51, 2, 90);
-    var vision = new CheckBox { X = 2, Y = 53, Text = "Use vision", Value = profile.Vision ? CheckState.Checked : CheckState.UnChecked };
-    var jinja = new CheckBox { X = 20, Y = 53, Text = "Jinja", Value = profile.Jinja ? CheckState.Checked : CheckState.UnChecked };
-    var metrics = new CheckBox { X = 36, Y = 53, Text = "Metrics", Value = profile.Metrics ? CheckState.Checked : CheckState.UnChecked };
-    var mmap = new CheckBox { X = 52, Y = 53, Text = "Disable mmap", Value = profile.NoMmap ? CheckState.Checked : CheckState.UnChecked };
+    Field("MTP spec type (blank/draft-mtp)", profile.SpecType, 46); Field("MTP max draft tokens", profile.SpecDraftNMax.ToString(), 46, 49);
+    Field("Image min tokens (0 = default)", profile.ImageMinTokens.ToString(), 49); Field("Context checkpoints", profile.CtxCheckpoints.ToString(), 49, 49);
+    Field("Extra args (quoted when needed)", ArgumentText.Format(profile.ExtraArgs), 52, 2, 90);
+    Field("Tags (comma separated, shown in the profile list)", string.Join(", ", profile.Tags), 54, 2, 90);
+    var vision = new CheckBox { X = 2, Y = 56, Text = "Use vision", Value = profile.Vision ? CheckState.Checked : CheckState.UnChecked };
+    var jinja = new CheckBox { X = 20, Y = 56, Text = "Jinja", Value = profile.Jinja ? CheckState.Checked : CheckState.UnChecked };
+    var metrics = new CheckBox { X = 36, Y = 56, Text = "Metrics", Value = profile.Metrics ? CheckState.Checked : CheckState.UnChecked };
+    var mmap = new CheckBox { X = 52, Y = 56, Text = "Disable mmap", Value = profile.NoMmap ? CheckState.Checked : CheckState.UnChecked };
     dialog.Add(vision, jinja, metrics, mmap);
-    var message = new Label { X = 2, Y = 54, Width = 65, Text = "Vision: supported Qwen model + matching mmproj-BF16.gguf." };
-    var save = new Button { X = 68, Y = 54, Text = "Save", IsDefault = true };
-    var cancel = new Button { X = Pos.Right(save) + 1, Y = 54, Text = "Cancel" };
+    var message = new Label { X = 2, Y = 57, Width = 65, Text = "Vision: supported Qwen model + matching mmproj-BF16.gguf." };
+    var save = new Button { X = 68, Y = 57, Text = "Save", IsDefault = true };
+    var cancel = new Button { X = Pos.Right(save) + 1, Y = 57, Text = "Cancel" };
     dialog.Add(message, save, cancel);
     var accepted = false;
     findMmproj.Accepting += (_, _) =>
@@ -1004,6 +1010,8 @@ static bool EditProfile(IApplication app, Profile profile, string title)
             profile.Batch = ParseInt(T("Batch"), "Batch"); profile.UBatch = ParseInt(T("Micro batch"), "Micro batch");
             profile.ImageMinTokens = ParseInt(T("Image min tokens (0 = default)"), "Image minimum tokens");
             profile.CtxCheckpoints = ParseInt(T("Context checkpoints"), "Context checkpoints");
+            profile.SpecType = T("MTP spec type (blank/draft-mtp)").Trim().ToLowerInvariant();
+            profile.SpecDraftNMax = ParseInt(T("MTP max draft tokens"), "MTP maximum draft tokens");
             profile.ChatTemplate = T("Chat template").Trim();
             var reasoning = T("Reasoning / budget").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             profile.Reasoning = reasoning.FirstOrDefault() ?? "auto"; profile.ReasoningBudget = reasoning.Length > 1 ? ParseInt(reasoning[1], "Reasoning budget") : -1;

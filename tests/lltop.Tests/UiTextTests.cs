@@ -3,6 +3,21 @@ using Xunit;
 public sealed class UiTextTests
 {
     [Theory]
+    [InlineData(3, 2, 4)]
+    [InlineData(3, 4, 2)]
+    public void SkipFavoritesDivider_PreservesCursorDirection(int divider, int previousItem, int expectedItem)
+    {
+        Assert.Equal(expectedItem, UiText.SkipFavoritesDivider(divider, previousItem, profileCount: 6, favoriteCount: 3));
+    }
+
+    [Fact]
+    public void ProfileListItem_AddsDividerOffsetOnlyForNormalProfiles()
+    {
+        Assert.Equal(2, UiText.ProfileListItem(2, profileCount: 6, favoriteCount: 3));
+        Assert.Equal(4, UiText.ProfileListItem(3, profileCount: 6, favoriteCount: 3));
+    }
+
+    [Theory]
     [InlineData(true, true, "💥")]
     [InlineData(true, false, "💥")]
     [InlineData(false, true, "●")]

@@ -215,6 +215,9 @@ sealed class ServerRunner : IDisposable
         Flag("--jinja", p.Jinja, "jinja");
         Pair("--reasoning", p.Reasoning, "reasoning");
         segments.Add(new(["--reasoning-budget", p.ReasoningBudget.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "reasoning budget"));
+        Pair("--spec-type", p.SpecType, "speculative decoding type");
+        if (!string.IsNullOrWhiteSpace(p.SpecType))
+            segments.Add(new(["--spec-draft-n-max", p.SpecDraftNMax.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "MTP maximum draft tokens"));
         Flag("--no-mmap", p.NoMmap, "mmap");
         Pair("--chat-template", p.ChatTemplate, "chat template");
         segments.AddRange(ParseExtraArgumentSegments(FilterExtraArguments(p.ExtraArgs), capabilities));
@@ -230,6 +233,8 @@ sealed class ServerRunner : IDisposable
             if (value.StartsWith("--flash-attn=") || value.StartsWith("-fa=")) continue;
             if (value == "--mmproj") { if (i + 1 < args.Count) i++; continue; }
             if (value.StartsWith("--mmproj=")) continue;
+            if (value == "--spec-type" || value == "--spec-draft-n-max") { if (i + 1 < args.Count && !args[i + 1].StartsWith('-')) i++; continue; }
+            if (value.StartsWith("--spec-type=") || value.StartsWith("--spec-draft-n-max=")) continue;
             yield return value;
         }
     }

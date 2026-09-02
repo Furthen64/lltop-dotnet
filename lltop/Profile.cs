@@ -39,6 +39,8 @@ sealed class Profile
     public string ChatTemplate { get; set; } = "";
     public string Reasoning { get; set; } = "auto";
     public int ReasoningBudget { get; set; } = -1;
+    public string SpecType { get; set; } = "";
+    public int SpecDraftNMax { get; set; } = 3;
     public List<string> ExtraArgs { get; set; } = [];
     public string SourcePath { get; set; } = "";
 
@@ -61,6 +63,7 @@ sealed class Profile
         Batch = Batch, UBatch = UBatch, Parallel = Parallel, CtxCheckpoints = CtxCheckpoints, Threads = Threads,
         FlashAttn = FlashAttn, Jinja = Jinja, Metrics = Metrics, NoMmap = NoMmap,
         ChatTemplate = ChatTemplate, Reasoning = Reasoning, ReasoningBudget = ReasoningBudget,
+        SpecType = SpecType, SpecDraftNMax = SpecDraftNMax,
         ExtraArgs = [.. ExtraArgs], SourcePath = SourcePath
     };
 
@@ -73,6 +76,9 @@ sealed class Profile
         if (!new[] { "", "auto", "on", "off" }.Contains(Reasoning, StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException("Reasoning must be auto, on, or off.");
         if (ReasoningBudget < -1) throw new InvalidOperationException("Reasoning budget must be -1 or greater.");
+        if (!new[] { "", "draft-mtp" }.Contains(SpecType, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Speculative decoding type must be draft-mtp or blank.");
+        if (SpecDraftNMax < 1) throw new InvalidOperationException("MTP maximum draft tokens must be at least 1.");
         if (RepeatPenalty < 0) throw new InvalidOperationException("Repeat penalty cannot be negative.");
         if (RepeatLastN < -1) throw new InvalidOperationException("Repeat last N must be -1 or greater.");
         if (ImageMinTokens < 0) throw new InvalidOperationException("Image minimum tokens cannot be negative.");
@@ -187,6 +193,7 @@ sealed class ProfileStore(string directory)
         I("batch", p.Batch); I("ubatch", p.UBatch); I("parallel", p.Parallel); I("ctx_checkpoints", p.CtxCheckpoints); I("threads", p.Threads);
         S("flash_attn", p.FlashAttn); B("jinja", p.Jinja); B("metrics", p.Metrics); B("no_mmap", p.NoMmap);
         S("chat_template", p.ChatTemplate); S("reasoning", p.Reasoning); I("reasoning_budget", p.ReasoningBudget);
+        S("spec_type", p.SpecType); I("spec_draft_n_max", p.SpecDraftNMax);
         b.Append("extra_args = [").Append(string.Join(", ", p.ExtraArgs.Select(Toml.Quote))).AppendLine("]");
         return b.ToString();
     }

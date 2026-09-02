@@ -5,6 +5,16 @@ static class UiText
 
     public sealed record ProfileRowData(string Marker, bool Vision, string Name, IReadOnlyList<string> Tags, string Size);
 
+    public static int ProfileListItem(int profileIndex, int profileCount, int favoriteCount) =>
+        profileIndex + (HasFavoritesDivider(profileCount, favoriteCount) && profileIndex >= favoriteCount ? 1 : 0);
+
+    public static int SkipFavoritesDivider(int requestedItem, int previousItem, int profileCount, int favoriteCount) =>
+        !HasFavoritesDivider(profileCount, favoriteCount) || requestedItem != favoriteCount
+            ? requestedItem
+            : Math.Clamp(requestedItem + (requestedItem < previousItem ? -1 : 1), 0, profileCount);
+
+    static bool HasFavoritesDivider(int profileCount, int favoriteCount) => favoriteCount > 0 && favoriteCount < profileCount;
+
     // Columns: glyph · [V] slot · profile name · tags · image size. The [V] slot and the
     // name column keep a fixed width so tags line up across rows; tags truncate before names do.
     public static List<string> ProfileRows(IEnumerable<ProfileRowData> source, int width)
