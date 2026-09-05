@@ -1,10 +1,17 @@
 sealed record GeneratedProfilesResult(int ModelsFound, int ProfilesCreated);
+sealed record ModelInspection(string Path, bool IsRunnable, string Status);
 
 static class FirstRunProfiles
 {
     internal const int ModelSearchDepth = 3;
 
     public static IReadOnlyList<string> DiscoverModels(string modelsDirectory, int maxDepth = ModelSearchDepth)
+        => InspectModels(modelsDirectory, maxDepth)
+            .Where(model => model.IsRunnable)
+            .Select(model => model.Path)
+            .ToList();
+
+    public static IReadOnlyList<ModelInspection> InspectModels(string modelsDirectory, int maxDepth = ModelSearchDepth)
     {
         if (string.IsNullOrWhiteSpace(modelsDirectory)) return [];
         if (maxDepth < 1) return [];
@@ -13,9 +20,9 @@ static class FirstRunProfiles
         if (!Directory.Exists(root)) throw new DirectoryNotFoundException($"Models directory was not found: {root}");
         var ignore = ModelIgnore.Load(root);
 
-        var models = new List<string>();
+        var models = new List<ModelInspection>();
         Scan(root, 1);
-        models.Sort(StringComparer.OrdinalIgnoreCase);
+        models.Sort((left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.Path, right.Path));
         return models;
 
         void Scan(string directory, int fileDepth)
@@ -26,18 +33,13 @@ static class FirstRunProfiles
                 {
                     if (ignore.IsIgnored(Path.GetRelativePath(root, path), isDirectory: false)) continue;
                     if (Path.GetFileName(path).StartsWith("mmproj", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (IsSidecarFileName(Path.GetFileName(path))) continue;
                     var extension = Path.GetExtension(path);
                     if (extension.Equals(".gguf", StringComparison.OrdinalIgnoreCase) ||
                         extension.Equals(".bin", StringComparison.OrdinalIgnoreCase))
                     {
-                        try
-                        {
-                            var meta = GgufMetadataReader.Read(path);
-                            var arch = meta.String("general.architecture");
-                            if (!string.IsNullOrEmpty(arch) && !IsNonChatArchitecture(arch))
-                                models.Add(Path.GetFullPath(path));
-                        }
-                        catch { /* skip files we can't read */ }
+                        var inspection = Inspect(path, extension);
+                        models.Add(inspection);
                     }
                 }
 
@@ -55,6 +57,41 @@ static class FirstRunProfiles
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
+        }
+
+        static ModelInspection Inspect(string path, string extension)
+        {
+            try
+            {
+                var length = new FileInfo(path).Length;
+                if (length == 0) return new(Path.GetFullPath(path), false, "Empty file");
+
+                if (extension.Equals(".bin", StringComparison.OrdinalIgnoreCase))
+                    return new(Path.GetFullPath(path), false, "Unverified legacy BIN");
+
+                var meta = GgufMetadataReader.Read(path);
+                var arch = meta.String("general.architecture");
+                var type = meta.String("general.type");
+                if (IsSidecarGguf(type))
+                    return new(Path.GetFullPath(path), false, $"Sidecar GGUF ({type})");
+                if (!string.IsNullOrEmpty(arch) && IsNonChatArchitecture(arch))
+                    return new(Path.GetFullPath(path), false, $"Not a chat model ({arch})");
+                return new(Path.GetFullPath(path), true,
+                    string.IsNullOrWhiteSpace(arch) ? $"GGUF verified · {FormatSize(length)}" : $"GGUF verified · {arch} · {FormatSize(length)}");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or EndOfStreamException)
+            {
+                return new(Path.GetFullPath(path), false, $"Invalid GGUF: {ex.Message}");
+            }
+        }
+
+        static string FormatSize(long bytes)
+        {
+            string[] units = ["B", "KB", "MB", "GB", "TB"];
+            var size = (double)bytes;
+            var unit = 0;
+            while (size >= 1024 && unit < units.Length - 1) { size /= 1024; unit++; }
+            return unit == 0 ? $"{bytes} B" : $"{size:0.0} {units[unit]}";
         }
     }
 
@@ -246,7 +283,14 @@ static class FirstRunProfiles
     static bool IsNonChatArchitecture(string arch)
     {
         var a = arch.ToLowerInvariant();
-        return a == "bert" || a == "nomic-bert" || a == "jina" || a == "e5-mistral" ||
+        return a == "bert" || a == "nomic-bert" || a == "jina" || a == "e5-mistral" || a == "clip" ||
                a == "colbert-architectures" || a == "jina-colbert-v2";
     }
+
+    static bool IsSidecarFileName(string fileName)
+        => fileName.Contains("imatrix", StringComparison.OrdinalIgnoreCase) ||
+           fileName.Contains("importance-matrix", StringComparison.OrdinalIgnoreCase);
+
+    static bool IsSidecarGguf(string? type)
+        => type?.Equals("imatrix", StringComparison.OrdinalIgnoreCase) == true;
 }

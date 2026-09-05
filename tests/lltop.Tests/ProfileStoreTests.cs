@@ -58,6 +58,20 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void LoadAll_MigratesLegacyMtpWithoutExplicitDraftTokenCount()
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "legacy.toml"), "name = \"legacy\"\nspec_type = \"draft-mtp\"\n");
+
+        var result = new ProfileStore(directory).LoadAll();
+
+        Assert.Empty(result.Errors);
+        var profile = Assert.Single(result.Profiles);
+        Assert.True(profile.Mtp);
+        Assert.Equal(3, profile.MtpDraftTokens);
+    }
+
+    [Fact]
     public void LoadAll_PutsFavoritesBeforeOtherProfiles()
     {
         var store = new ProfileStore(directory);

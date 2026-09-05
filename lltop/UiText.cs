@@ -78,7 +78,8 @@ static class UiText
     {
         if (stats.Progress is > 0 and < 1)
         {
-            var activeInput = $"reading {stats.Progress:P0}";
+            var percent = (int)Math.Round(stats.Progress * 100, MidpointRounding.AwayFromZero);
+            var activeInput = $"reading {percent} %";
             if (stats.PromptProgressTokens > 0) activeInput += $"  ·  {stats.PromptProgressTokens:N0} tokens";
             if (stats.PromptProgressTokensPerSecond > 0) activeInput += $"  ·  {stats.PromptProgressTokensPerSecond:F1} tok/s";
             return $"Input   {activeInput}\nOutput  waiting for generation…";

@@ -423,7 +423,7 @@ void RefreshModels()
         if (result.ModelsFound == 0)
         {
             ReloadProfiles(message: $"No compatible models found in {cfg.ModelsDir}.");
-            MessageBox.Query(app, "Model discovery", $"No compatible GGUF or BIN models were found in:\n{cfg.ModelsDir}\n\nlltop scans up to {FirstRunProfiles.ModelSearchDepth} folders deep and skips unreadable files, mmproj files, and paths matched by .llmignore.", "OK");
+            MessageBox.Query(app, "Model discovery", $"No verified GGUF language models were found in:\n{cfg.ModelsDir}\n\nlltop scans up to {FirstRunProfiles.ModelSearchDepth} folders deep and skips invalid, non-language, projector, and ignored files.", "OK");
             return;
         }
         var message = result.ProfilesCreated == 0
@@ -561,7 +561,7 @@ async Task RunBenchmark()
             var completed = update.Cases.Count(x => x.Status is not BenchmarkCaseStatus.Pending and not BenchmarkCaseStatus.Running);
             UpdateStatus($"Benchmark {completed}/{update.Cases.Count}: {update.Cases.FirstOrDefault(x => x.Status == BenchmarkCaseStatus.Running)?.Label ?? update.Status.ToString()}");
             RefreshLogs();
-        }), benchmarkCancellation.Token);
+        }), benchmarkCancellation.Token, saveHtml: false);
         var selectedContext = await PickContextForCacheLayer(benchmark);
         if (selectedContext is null)
         {
@@ -587,7 +587,12 @@ async Task RunBenchmark()
             var completed = update.Cases.Count(x => x.Status is not BenchmarkCaseStatus.Pending and not BenchmarkCaseStatus.Running);
             UpdateStatus($"Cache/math benchmark {completed}/{update.Cases.Count}: {update.Cases.FirstOrDefault(x => x.Status == BenchmarkCaseStatus.Running)?.Label ?? update.Status.ToString()}");
             RefreshLogs();
-        }), benchmarkCancellation.Token);
+        }), benchmarkCancellation.Token, saveHtml: false);
+        var combinedHtmlReport = BenchmarkReport.SaveCombinedHtml(cfg.BenchmarksDir, benchmark, cacheBenchmark);
+        benchmark.HtmlReport = combinedHtmlReport;
+        cacheBenchmark.HtmlReport = combinedHtmlReport;
+        BenchmarkStore.SaveJson(cfg.BenchmarksDir, benchmark);
+        BenchmarkStore.SaveJson(cfg.BenchmarksDir, cacheBenchmark);
         app.Invoke(() =>
         {
             UpdateStatus($"Cache and math benchmark {cacheBenchmark.Status}. Reports: {cacheBenchmark.HtmlReport}");
@@ -609,7 +614,7 @@ Task<Profile?> PickContextForCacheLayer(BenchmarkRecord benchmark)
     var completion = new TaskCompletionSource<Profile?>();
     app.Invoke(() =>
     {
-        ShowBenchmarkResults(app, benchmark);
+        ShowBenchmarkResults(app, benchmark, continuesToCacheAndMath: true);
         var candidates = benchmark.Cases.Where(x => x.Status == BenchmarkCaseStatus.Completed && x.Setting == "ctx").ToList();
         if (candidates.Count == 0)
         {
@@ -1338,14 +1343,14 @@ static bool ShowVisionSetup(IApplication app, Profile profile)
 
 static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
 {
-    var wizard = new Window { Title = " Welcome to lltop ", Width = 90, Height = 19 };
-    wizard.Add(new Label { X = 2, Y = 1, Text = "Connect lltop to your llama.cpp installation." });
+    var wizard = new Window { Title = " Setup · step 1 of 2 ", Width = 90, Height = 19 };
+    wizard.Add(new Label { X = 2, Y = 1, Text = "Step 1: connect lltop to your llama.cpp installation. Next, you will review the models found." });
     wizard.Add(new Label { X = 2, Y = 3, Text = "llama-server binary or app directory" });
     var server = new TextField { X = 2, Y = 4, Width = Dim.Fill(4), Text = "~/llama/app" };
     wizard.Add(server, new Label { X = 2, Y = 6, Text = "Models directory" });
     var models = new TextField { X = 2, Y = 7, Width = Dim.Fill(4), Text = "~/llama/models" };
     var message = new Label { X = 2, Y = 10, Width = Dim.Fill(4), Height = 2, Text = "Both paths must already exist. Esc cancels setup." };
-    var save = new Button { X = 2, Y = 14, Text = "Save and continue", IsDefault = true };
+    var save = new Button { X = 2, Y = 14, Text = "Next: review models", IsDefault = true };
     var cancel = new Button { X = Pos.Right(save) + 2, Y = 14, Text = "Cancel" };
     wizard.Add(models, message, save, cancel);
     var completed = false;
@@ -1358,6 +1363,8 @@ static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
             var modelsPath = AppConfig.Expand(models.Text);
             if (!File.Exists(serverPath)) throw new InvalidOperationException("llama-server was not found at that location.");
             if (!Directory.Exists(modelsPath)) throw new InvalidOperationException("Models directory was not found.");
+            var inspection = FirstRunProfiles.InspectModels(modelsPath).Where(model => model.IsRunnable).ToList();
+            if (!ShowFirstRunModelReview(app, modelsPath, inspection)) return;
             cfg.LlamaServer = serverPath;
             cfg.ModelsDir = modelsPath;
             cfg.Save();
@@ -1370,6 +1377,32 @@ static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
     cancel.Accepting += (_, _) => app.RequestStop();
     app.Run(wizard);
     return completed;
+}
+
+static bool ShowFirstRunModelReview(IApplication app, string modelsPath, IReadOnlyList<ModelInspection> models)
+{
+    var review = new Window { Title = " Setup · step 2 of 2 · review models ", Width = 100, Height = 24 };
+    var runnable = models.Count(model => model.IsRunnable);
+    review.Add(new Label
+    {
+        X = 2, Y = 1, Width = Dim.Fill(4),
+        Text = $"Step 2: review the verified GGUF language models before entering lltop. Found {runnable} model{(runnable == 1 ? "" : "s")} in {modelsPath}."
+    });
+    review.Add(new Label { X = 2, Y = 3, Text = "Only verified GGUF language models are shown and will receive profiles." });
+    var items = new ObservableCollection<string>(models.Select(model =>
+        $"{(model.IsRunnable ? "✓" : "!")} {Path.GetFileName(model.Path),-42}  {model.Status}"));
+    if (items.Count == 0) items.Add("No verified GGUF language models found.");
+    var list = new ListView { X = 2, Y = 5, Width = Dim.Fill(4), Height = 11 };
+    list.SetSource(items);
+    var continueButton = new Button { X = 2, Y = 18, Text = "Create profiles and continue", IsDefault = true };
+    var back = new Button { X = Pos.Right(continueButton) + 2, Y = 18, Text = "Back" };
+    var confirmed = false;
+    continueButton.Accepting += (_, _) => { confirmed = true; app.RequestStop(); };
+    back.Accepting += (_, _) => app.RequestStop();
+    review.KeyDown += (_, key) => { if (key.KeyCode == KeyCode.Esc) { app.RequestStop(); key.Handled = true; } };
+    review.Add(list, continueButton, back);
+    app.Run(review);
+    return confirmed;
 }
 
 static BenchmarkSetup? ShowBenchmarkSetup(IApplication app, Profile profile)
@@ -1420,14 +1453,19 @@ static BenchmarkSetup? ShowBenchmarkSetup(IApplication app, Profile profile)
     return setup;
 }
 
-static void ShowBenchmarkResults(IApplication app, BenchmarkRecord benchmark)
+static void ShowBenchmarkResults(IApplication app, BenchmarkRecord benchmark, bool continuesToCacheAndMath = false)
 {
-    var window = new Window { Title = $" Benchmark results · {benchmark.ProfileName} ", Width = Dim.Percent(90), Height = Dim.Percent(80) };
+    var title = continuesToCacheAndMath
+        ? $" Benchmark · phase 1 of 2 · context results · {benchmark.ProfileName} "
+        : $" Benchmark results · {benchmark.ProfileName} ";
+    var window = new Window { Title = title, Width = Dim.Percent(90), Height = Dim.Percent(80) };
     window.KeyDown += (_, key) => { if (key.KeyCode == KeyCode.Esc || key.AsGrapheme.Equals("q", StringComparison.OrdinalIgnoreCase)) { app.RequestStop(); key.Handled = true; } };
     var warnings = benchmark.Cases.Where(x => BenchmarkReport.Headroom(x).StartsWith("WARNING", StringComparison.Ordinal) || BenchmarkReport.Headroom(x).StartsWith("CRITICAL", StringComparison.Ordinal)).ToList();
     var peak = benchmark.Cases.Where(x => x.VramUsedBytes.HasValue).OrderByDescending(x => x.VramUsedBytes).FirstOrDefault();
-    var lines = new List<string>
-    {
+    var lines = new List<string>();
+    if (continuesToCacheAndMath)
+        lines.AddRange(["Phase 1 of 2 complete. Next, choose a context result for the cache + math benchmark.", ""]);
+    lines.AddRange([
         $"Status       {benchmark.Status}",
         $"Cases        {benchmark.Cases.Count(x => x.Status == BenchmarkCaseStatus.Completed)}/{benchmark.Cases.Count} completed",
         $"Memory fit   {BenchmarkReport.MemoryPosture(benchmark, peak)}",
@@ -1436,19 +1474,22 @@ static void ShowBenchmarkResults(IApplication app, BenchmarkRecord benchmark)
         "",
         "CASE                         STATUS        MATH     POST-WARMUP VRAM                 HEADROOM / RISK",
         new string('─', 92)
-    };
+    ]);
     lines.AddRange(benchmark.Cases.Select(x => $"{x.Label,-28} {x.Status,-13} {(x.MathTotal is null ? "—" : $"{x.MathCorrect}/{x.MathTotal}"),-8} {BenchmarkReport.FormatVram(x),-34} {BenchmarkReport.Headroom(x)}{(x.Error.Length > 0 ? $"  {x.Error}" : "")}"));
-    lines.AddRange(["", "Reports", $"HTML  {benchmark.HtmlReport}", $"JSON  {benchmark.JsonReport}", "", "Close-to-OOM means peak sampled VRAM was at least 80% of reported total GPU VRAM."]);
+    lines.AddRange(["", "Reports", $"JSON  {benchmark.JsonReport}"]);
+    if (!string.IsNullOrWhiteSpace(benchmark.HtmlReport)) lines.Add($"HTML  {benchmark.HtmlReport}");
+    lines.AddRange(["", "Close-to-OOM means peak sampled VRAM was at least 80% of reported total GPU VRAM."]);
     var results = new LogTextView { X = 1, Y = 1, Width = Dim.Fill(2), Height = Dim.Fill(3), ReadOnly = true, WordWrap = true,
         Text = string.Join('\n', lines), HighlightSeverityMarkersOnly = true };
     LltopTheme.ApplyAnalysis(results);
-    var openReport = new Button { X = 1, Y = Pos.Bottom(results), Text = "Open HTML report" };
+    var hasHtmlReport = !string.IsNullOrWhiteSpace(benchmark.HtmlReport);
+    var openReport = new Button { X = 1, Y = Pos.Bottom(results), Text = "Open HTML report", Visible = hasHtmlReport };
     openReport.Accepting += (_, _) =>
     {
         try { LaunchBenchmarkReport(benchmark.HtmlReport); }
         catch (Exception ex) { MessageBox.ErrorQuery(app, "Open benchmark report", ex.Message, "OK"); }
     };
-    var close = new Button { X = Pos.Right(openReport) + 2, Y = Pos.Bottom(results), Text = "Close", IsDefault = true };
+    var close = new Button { X = hasHtmlReport ? Pos.Right(openReport) + 2 : 1, Y = Pos.Bottom(results), Text = continuesToCacheAndMath ? "Next: choose cache context" : "Close", IsDefault = true };
     close.Accepting += (_, _) => app.RequestStop();
     window.Add(results, openReport, close); app.Run(window);
 }

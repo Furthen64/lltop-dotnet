@@ -206,9 +206,34 @@ internal static class BenchmarkReport
     public static string Html(BenchmarkRecord benchmark)
     {
         var json = JsonSerializer.Serialize(benchmark, new JsonSerializerOptions { Encoder = JavaScriptEncoder.Default });
-        var rows = string.Join("", benchmark.Cases.Select(c => $"<tr><td>{E(c.Label)}</td><td>{E(c.Status.ToString())}</td><td>{E(c.PreWarmupVramUsedBytes is null ? "unavailable" : FormatBytes(c.PreWarmupVramUsedBytes))}</td><td>{E(FormatVram(c))}</td><td>{E(FreeVram(c))}</td><td>{E(c.MathTotal is null ? "—" : $"{c.MathCorrect}/{c.MathTotal}")}</td><td class=\"{Risk(c).ToLowerInvariant()}\">{E(Risk(c))}</td><td>{E(c.Error)}</td></tr>"));
-        return $"<!doctype html><html><head><meta charset=\"utf-8\"><title>lltop benchmark {E(benchmark.ProfileName)}</title><style>body{{font:16px system-ui;margin:2rem;color:#1f2937}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #d1d5db;padding:.5rem;text-align:left}}th{{background:#f3f4f6}}.warning{{color:#a16207;font-weight:700}}.critical{{color:#dc2626;font-weight:700}}.normal{{color:#15803d;font-weight:700}}code{{white-space:pre-wrap}}</style></head><body><h1>Benchmark: {E(benchmark.ProfileName)}</h1><p>Status: <b>{E(benchmark.Status.ToString())}</b> · Started: {E(benchmark.StartedAt.LocalDateTime.ToString("u"))}</p><p>Workload: {E(benchmark.Workload.Prompt)} · max tokens {benchmark.Workload.MaxTokens}</p><table><thead><tr><th>Case</th><th>Status</th><th>Pre-Warmup VRAM</th><th>Post-Warmup VRAM</th><th>Free-VRAM</th><th>Math</th><th>Risk</th><th>Error</th></tr></thead><tbody>{rows}</tbody></table><h2>Embedded data</h2><code id=\"data\"></code><script>document.getElementById('data').textContent=JSON.stringify({json},null,2);</script></body></html>";
+        return Document($"Benchmark: {E(benchmark.ProfileName)}", Section("Results", benchmark) + EmbeddedData(json));
     }
+
+    public static string SaveCombinedHtml(string directory, BenchmarkRecord context, BenchmarkRecord cacheAndMath)
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, $"{context.StartedAt:yyyy-MM-dd_HHmmss}_{ProfileStore.Slugify(context.ProfileName)}_benchmark.html");
+        File.WriteAllText(path, CombinedHtml(context, cacheAndMath));
+        return path;
+    }
+
+    public static string CombinedHtml(BenchmarkRecord context, BenchmarkRecord cacheAndMath)
+    {
+        var data = JsonSerializer.Serialize(new { context, cache_and_math = cacheAndMath }, new JsonSerializerOptions { Encoder = JavaScriptEncoder.Default });
+        var body = $"<h1>Benchmark: {E(context.ProfileName)}</h1><p>This report combines both benchmark phases.</p>" +
+            Section("Phase 1 of 2: context sweep", context) +
+            Section("Phase 2 of 2: cache + math", cacheAndMath) + EmbeddedData(data);
+        return Document($"lltop benchmark {E(context.ProfileName)}", body);
+    }
+
+    static string Section(string heading, BenchmarkRecord benchmark)
+    {
+        var rows = string.Join("", benchmark.Cases.Select(c => $"<tr><td>{E(c.Label)}</td><td>{E(c.Status.ToString())}</td><td>{E(c.PreWarmupVramUsedBytes is null ? "unavailable" : FormatBytes(c.PreWarmupVramUsedBytes))}</td><td>{E(FormatVram(c))}</td><td>{E(FreeVram(c))}</td><td>{E(c.MathTotal is null ? "—" : $"{c.MathCorrect}/{c.MathTotal}")}</td><td class=\"{Risk(c).ToLowerInvariant()}\">{E(Risk(c))}</td><td>{E(c.Error)}</td></tr>"));
+        return $"<section><h2>{E(heading)}</h2><p>Status: <b>{E(benchmark.Status.ToString())}</b> · Started: {E(benchmark.StartedAt.LocalDateTime.ToString("u"))}</p><p>Workload: {E(benchmark.Workload.Prompt)} · max tokens {benchmark.Workload.MaxTokens}</p><table><thead><tr><th>Case</th><th>Status</th><th>Pre-Warmup VRAM</th><th>Post-Warmup VRAM</th><th>Free-VRAM</th><th>Math</th><th>Risk</th><th>Error</th></tr></thead><tbody>{rows}</tbody></table></section>";
+    }
+
+    static string EmbeddedData(string json) => $"<h2>Embedded data</h2><code id=\"data\"></code><script>document.getElementById('data').textContent=JSON.stringify({json},null,2);</script>";
+    static string Document(string title, string body) => $"<!doctype html><html><head><meta charset=\"utf-8\"><title>{title}</title><style>body{{font:16px system-ui;margin:2rem;color:#1f2937}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #d1d5db;padding:.5rem;text-align:left}}th{{background:#f3f4f6}}section{{margin:2rem 0}}.warning{{color:#a16207;font-weight:700}}.critical{{color:#dc2626;font-weight:700}}.normal{{color:#15803d;font-weight:700}}code{{white-space:pre-wrap}}</style></head><body>{body}</body></html>";
 
     static string E(string? value) => System.Net.WebUtility.HtmlEncode(value ?? "");
     static string FormatBytes(long? value) => value is null ? "" : $"{value.Value / 1024d / 1024d:F1} MiB";
@@ -274,7 +299,7 @@ internal sealed class BenchmarkRunner
         this.httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
     }
 
-    public async Task RunAsync(BenchmarkRecord benchmark, Action<BenchmarkRecord>? progress, CancellationToken cancellationToken)
+    public async Task RunAsync(BenchmarkRecord benchmark, Action<BenchmarkRecord>? progress, CancellationToken cancellationToken, bool saveHtml = true)
     {
         if (serverIsActive()) throw new InvalidOperationException("Stop the active llama-server before starting a benchmark.");
         benchmark.Workload.Validate();
@@ -297,7 +322,7 @@ internal sealed class BenchmarkRunner
             : benchmark.Cases.Any(x => x.Status == BenchmarkCaseStatus.Failed) ? BenchmarkCaseStatus.Failed : BenchmarkCaseStatus.Completed;
         benchmark.EndedAt = DateTimeOffset.Now;
         benchmark.JsonReport = BenchmarkStore.SaveJson(config.BenchmarksDir, benchmark);
-        benchmark.HtmlReport = BenchmarkReport.SaveHtml(config.BenchmarksDir, benchmark);
+        if (saveHtml) benchmark.HtmlReport = BenchmarkReport.SaveHtml(config.BenchmarksDir, benchmark);
         BenchmarkStore.SaveJson(config.BenchmarksDir, benchmark);
         progress?.Invoke(benchmark);
     }

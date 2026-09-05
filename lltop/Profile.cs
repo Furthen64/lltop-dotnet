@@ -206,7 +206,7 @@ sealed class ProfileStore(string directory)
         if (!profile.SpecType.Equals("draft-mtp", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Legacy speculative decoding type must be draft-mtp.");
         profile.Mtp = true;
-        if (profile.SpecDraftNMax > 0) profile.MtpDraftTokens = profile.SpecDraftNMax;
+        profile.MtpDraftTokens = profile.SpecDraftNMax > 0 ? profile.SpecDraftNMax : 3;
         profile.SpecType = "";
         profile.SpecDraftNMax = 0;
     }
