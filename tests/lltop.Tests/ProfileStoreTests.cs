@@ -72,6 +72,36 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void ApplyRecommendedSettings_UsesQ8CachesWithoutChangingModelDetails()
+    {
+        var profile = new Profile
+        {
+            Name = "coding", Model = "/models/coding.gguf", LlamaServer = "/bin/llama-server",
+            Host = "127.0.0.1", Port = 9090, ChatTemplate = "chatml", Vision = true,
+            Mmproj = "/models/mmproj-BF16.gguf", CacheK = "q4_0", CacheV = "q4_0",
+            Ctx = 4096, Ngl = 0, Mtp = true, MtpDraftTokens = 3
+        };
+
+        profile.ApplyRecommendedSettings();
+
+        Assert.Equal("q8_0", profile.CacheK);
+        Assert.Equal("q8_0", profile.CacheV);
+        Assert.Equal(65536, profile.Ctx);
+        Assert.Equal(99, profile.Ngl);
+        Assert.Equal(512, profile.Batch);
+        Assert.Equal(256, profile.UBatch);
+        Assert.False(profile.Mtp);
+        Assert.Equal(0, profile.MtpDraftTokens);
+        Assert.Equal("/models/coding.gguf", profile.Model);
+        Assert.Equal("/bin/llama-server", profile.LlamaServer);
+        Assert.Equal("127.0.0.1", profile.Host);
+        Assert.Equal(9090, profile.Port);
+        Assert.Equal("chatml", profile.ChatTemplate);
+        Assert.True(profile.Vision);
+        Assert.Equal("/models/mmproj-BF16.gguf", profile.Mmproj);
+    }
+
+    [Fact]
     public void LoadAll_PutsFavoritesBeforeOtherProfiles()
     {
         var store = new ProfileStore(directory);
