@@ -11,13 +11,16 @@ public sealed class FirstRunProfilesTests : IDisposable
         Write("one/two/model.BIN");
         Write("one/two/three/too-deep.gguf");
         Write("mmproj-BF16.gguf");
+        Write("imatrix_unsloth.gguf");
+        WriteGgufWithType("calibration.gguf", "imatrix");
         Write("ignore.txt");
 
         var models = FirstRunProfiles.DiscoverModels(root);
 
-        Assert.Equal(2, models.Count);
+        Assert.Single(models);
         Assert.Contains(Path.Combine(root, "top.gguf"), models);
-        Assert.Contains(Path.Combine(root, "one/two/model.BIN"), models);
+        Assert.DoesNotContain(Path.Combine(root, "imatrix_unsloth.gguf"), models);
+        Assert.DoesNotContain(Path.Combine(root, "calibration.gguf"), models);
     }
 
     [Fact]
@@ -34,6 +37,24 @@ public sealed class FirstRunProfilesTests : IDisposable
         var models = FirstRunProfiles.DiscoverModels(root);
 
         Assert.Equal([Path.Combine(root, "experiments/keep.gguf"), Path.Combine(root, "keep.gguf")], models);
+    }
+
+    [Fact]
+    public void InspectModels_ReportsAndSkipsEmptyOrInvalidGgufs()
+    {
+        Write("good.gguf");
+        Write("empty.gguf", "");
+        Write("broken.gguf", "not a GGUF");
+
+        var models = FirstRunProfiles.InspectModels(root);
+
+        Assert.Collection(models,
+            model => { Assert.Equal(Path.Combine(root, "broken.gguf"), model.Path); Assert.False(model.IsRunnable); Assert.StartsWith("Invalid GGUF:", model.Status); },
+            model => { Assert.Equal(Path.Combine(root, "empty.gguf"), model.Path); Assert.False(model.IsRunnable); Assert.Equal("Empty file", model.Status); },
+            model => { Assert.Equal(Path.Combine(root, "good.gguf"), model.Path); Assert.True(model.IsRunnable); Assert.StartsWith("GGUF verified", model.Status); });
+        Assert.Equal([Path.Combine(root, "good.gguf")], FirstRunProfiles.DiscoverModels(root));
+        Assert.Equal(1, FirstRunProfiles.ScanAndGenerate(Config()).ProfilesCreated);
+        Assert.Single(new ProfileStore(Config().ProfilesDir).LoadAll().Profiles);
     }
 
     [Theory]
@@ -147,11 +168,44 @@ public sealed class FirstRunProfilesTests : IDisposable
         ProfilesDir = Path.Combine(root, "profiles")
     };
 
-    void Write(string relativePath)
+    void Write(string relativePath, string? contents = null)
     {
         var path = Path.Combine(root, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        if (contents is not null) { File.WriteAllText(path, contents); return; }
+        if (Path.GetExtension(path).Equals(".gguf", StringComparison.OrdinalIgnoreCase))
+        {
+            using var stream = File.Create(path);
+            using var writer = new BinaryWriter(stream);
+            writer.Write("GGUF".Select(character => (byte)character).ToArray());
+            writer.Write((uint)3);
+            writer.Write((ulong)0); // tensor count is not needed for metadata inspection
+            writer.Write((ulong)0); // metadata count
+            return;
+        }
         File.WriteAllText(path, "model");
+    }
+
+    void WriteGgufWithType(string relativePath, string type)
+    {
+        var path = Path.Combine(root, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+        writer.Write("GGUF".Select(character => (byte)character).ToArray());
+        writer.Write((uint)3);
+        writer.Write((ulong)0);
+        writer.Write((ulong)1);
+        WriteString("general.type");
+        writer.Write((uint)8); // GGUF string
+        WriteString(type);
+
+        void WriteString(string value)
+        {
+            var bytes = System.Text.Encoding.UTF8.GetBytes(value);
+            writer.Write((ulong)bytes.Length);
+            writer.Write(bytes);
+        }
     }
 
     public void Dispose()

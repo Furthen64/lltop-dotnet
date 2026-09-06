@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text.Json.Nodes;
 
 enum RunnerState { Stopped, Starting, Running, Stopping, Failed }
 
@@ -165,6 +166,9 @@ sealed class ServerRunner : IDisposable
 
     public static LaunchPlan BuildLaunchPlan(string executable, Profile profile, ServerCapabilityRecord capabilities)
     {
+        if (!string.IsNullOrWhiteSpace(profile.ReasoningEffort) && profile.ReasoningEffort != "default"
+            && !capabilities.SupportsOption("--reasoning-effort") && !capabilities.SupportsOption("--chat-template-kwargs"))
+            throw new InvalidOperationException("This server cannot apply the selected reasoning effort. Update llama-server or select Default effort.");
         var segments = BuildArgumentSegments(profile, capabilities);
         var filteredSegments = FilterSegments(segments, capabilities, out var removed);
         return new LaunchPlan(
@@ -177,6 +181,33 @@ sealed class ServerRunner : IDisposable
 
     static IReadOnlyList<LaunchArgumentSegment> BuildArgumentSegments(Profile p, ServerCapabilityRecord capabilities)
     {
+        var extraArgs = p.ExtraArgs.ToList();
+        var effort = p.ReasoningEffort.Trim().ToLowerInvariant();
+        string? templateKwargs = null;
+        if (effort is not "" and not "default" && !capabilities.SupportsOption("--reasoning-effort")
+            && capabilities.SupportsOption("--chat-template-kwargs"))
+        {
+            var merged = new JsonObject();
+            for (var i = 0; i < extraArgs.Count; i++)
+            {
+                var token = extraArgs[i];
+                if (token != "--chat-template-kwargs" && !token.StartsWith("--chat-template-kwargs=", StringComparison.Ordinal)) continue;
+                string json;
+                if (token == "--chat-template-kwargs")
+                {
+                    if (i + 1 >= extraArgs.Count) throw new InvalidOperationException("Extra args: --chat-template-kwargs requires a JSON object.");
+                    json = extraArgs[i + 1];
+                    extraArgs.RemoveAt(i + 1);
+                }
+                else json = token[(token.IndexOf('=') + 1)..];
+                var existing = JsonNode.Parse(json) as JsonObject
+                    ?? throw new InvalidOperationException("Extra args: --chat-template-kwargs must be a JSON object.");
+                foreach (var entry in existing) merged[entry.Key] = entry.Value?.DeepClone();
+                extraArgs.RemoveAt(i--);
+            }
+            merged["reasoning_effort"] = effort;
+            templateKwargs = merged.ToJsonString();
+        }
         var segments = new List<LaunchArgumentSegment>();
         void Pair(string flag, string value, string sourceLabel)
         {
@@ -214,6 +245,8 @@ sealed class ServerRunner : IDisposable
         Flag("--metrics", p.Metrics, "metrics");
         Flag("--jinja", p.Jinja, "jinja");
         Pair("--reasoning", p.Reasoning, "reasoning");
+        if (templateKwargs is not null) Pair("--chat-template-kwargs", templateKwargs, "reasoning effort");
+        else if (effort != "default") Pair("--reasoning-effort", effort, "reasoning effort");
         segments.Add(new(["--reasoning-budget", p.ReasoningBudget.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "reasoning budget"));
         if (p.Mtp)
         {
@@ -222,7 +255,7 @@ sealed class ServerRunner : IDisposable
         }
         Flag("--no-mmap", p.NoMmap, "mmap");
         Pair("--chat-template", p.ChatTemplate, "chat template");
-        segments.AddRange(ParseExtraArgumentSegments(FilterExtraArguments(p.ExtraArgs), capabilities));
+        segments.AddRange(ParseExtraArgumentSegments(FilterExtraArguments(extraArgs), capabilities));
         return segments;
     }
 

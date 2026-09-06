@@ -39,6 +39,7 @@ sealed class Profile
     public string ChatTemplate { get; set; } = "";
     public string Reasoning { get; set; } = "auto";
     public int ReasoningBudget { get; set; } = -1;
+    public string ReasoningEffort { get; set; } = "";
     public bool Mtp { get; set; }
     public int MtpDraftTokens { get; set; }
     // Read legacy speculative-decoding keys so existing profiles migrate on their next save.
@@ -55,6 +56,38 @@ sealed class Profile
         Port = cfg.DefaultPort
     };
 
+    // Keep model-specific details intact while restoring the settings that work well
+    // for a typical GPU-backed llama-server profile.
+    public void ApplyRecommendedSettings()
+    {
+        Ctx = 65536;
+        Ngl = 99;
+        CacheK = "q8_0";
+        CacheV = "q8_0";
+        Temp = .1;
+        TopP = .95;
+        TopK = 40;
+        MinP = .05;
+        RepeatPenalty = 1.10;
+        RepeatLastN = 256;
+        PresencePenalty = 0;
+        FrequencyPenalty = 0;
+        Batch = 512;
+        UBatch = 256;
+        Parallel = 1;
+        CtxCheckpoints = 4;
+        Threads = 0;
+        FlashAttn = "auto";
+        Jinja = true;
+        Metrics = true;
+        NoMmap = true;
+        Reasoning = "auto";
+        ReasoningBudget = -1;
+        ReasoningEffort = "";
+        Mtp = false;
+        MtpDraftTokens = 0;
+    }
+
     public Profile Copy(string name) => new()
     {
         Name = name, Description = Description, Favorite = Favorite, Tags = [.. Tags], LlamaServer = LlamaServer, Model = Model,
@@ -65,7 +98,7 @@ sealed class Profile
         PresencePenalty = PresencePenalty, FrequencyPenalty = FrequencyPenalty,
         Batch = Batch, UBatch = UBatch, Parallel = Parallel, CtxCheckpoints = CtxCheckpoints, Threads = Threads,
         FlashAttn = FlashAttn, Jinja = Jinja, Metrics = Metrics, NoMmap = NoMmap,
-        ChatTemplate = ChatTemplate, Reasoning = Reasoning, ReasoningBudget = ReasoningBudget,
+        ChatTemplate = ChatTemplate, Reasoning = Reasoning, ReasoningBudget = ReasoningBudget, ReasoningEffort = ReasoningEffort,
         Mtp = Mtp, MtpDraftTokens = MtpDraftTokens,
         ExtraArgs = [.. ExtraArgs], SourcePath = SourcePath
     };
@@ -79,6 +112,8 @@ sealed class Profile
         if (!new[] { "", "auto", "on", "off" }.Contains(Reasoning, StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException("Reasoning must be auto, on, or off.");
         if (ReasoningBudget < -1) throw new InvalidOperationException("Reasoning budget must be -1 or greater.");
+        if (!new[] { "", "default", "minimal", "low", "medium", "high", "xhigh", "max" }.Contains(ReasoningEffort, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Effort must be blank, default, minimal, low, medium, high, xhigh, or max; model support varies.");
         if (Mtp && MtpDraftTokens < 1) throw new InvalidOperationException("MTP draft tokens must be at least 1 when MTP is on.");
         if (RepeatPenalty < 0) throw new InvalidOperationException("Repeat penalty cannot be negative.");
         if (RepeatLastN < -1) throw new InvalidOperationException("Repeat last N must be -1 or greater.");
@@ -195,6 +230,7 @@ sealed class ProfileStore(string directory)
         I("batch", p.Batch); I("ubatch", p.UBatch); I("parallel", p.Parallel); I("ctx_checkpoints", p.CtxCheckpoints); I("threads", p.Threads);
         S("flash_attn", p.FlashAttn); B("jinja", p.Jinja); B("metrics", p.Metrics); B("no_mmap", p.NoMmap);
         S("chat_template", p.ChatTemplate); S("reasoning", p.Reasoning); I("reasoning_budget", p.ReasoningBudget);
+        S("reasoning_effort", p.ReasoningEffort);
         B("mtp", p.Mtp); I("mtp_draft_tokens", p.MtpDraftTokens);
         b.Append("extra_args = [").Append(string.Join(", ", p.ExtraArgs.Select(Toml.Quote))).AppendLine("]");
         return b.ToString();
@@ -206,7 +242,7 @@ sealed class ProfileStore(string directory)
         if (!profile.SpecType.Equals("draft-mtp", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Legacy speculative decoding type must be draft-mtp.");
         profile.Mtp = true;
-        if (profile.SpecDraftNMax > 0) profile.MtpDraftTokens = profile.SpecDraftNMax;
+        profile.MtpDraftTokens = profile.SpecDraftNMax > 0 ? profile.SpecDraftNMax : 3;
         profile.SpecType = "";
         profile.SpecDraftNMax = 0;
     }

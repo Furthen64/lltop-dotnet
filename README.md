@@ -21,7 +21,7 @@ A .NET 10 + Terminal.Gui v2 control center for llama.cpp's `llama-server`.
 - Detect externally started `llama-server` processes and follow their logs when available.
 - Copy launch commands, toggle log autoscroll, and inspect history from the keyboard.
 - Configure the llama.cpp binary and model directory with a first-run wizard.
-- Scan `.gguf` and `.bin` models after setup and generate profiles with Qwen, GPT-OSS, DeepSeek, or safe generic defaults.
+- Scan verified `.gguf` language models after setup and generate profiles with Qwen, GPT-OSS, DeepSeek, or safe generic defaults.
 - Enable Qwen3.6-35B-A3B and Qwen3.8-27B vision profiles with a matching `mmproj-BF16.gguf` projector.
 - Discover sibling `mmproj*.gguf` files and use their GGUF metadata to suggest the matching vision projector.
 - Exclude local models from discovery with glob patterns in `<models_dir>/.llmignore`.

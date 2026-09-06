@@ -61,7 +61,7 @@ var metricsFrame = new FrameView { Title = " Metrics ", X = Pos.Right(statusFram
 var metrics = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(), Text = "Waiting for the first request…" };
 metricsFrame.Add(metrics);
 var help = new Label { X = 1, Y = Pos.Bottom(statusFrame), Width = Dim.Fill(2), Height = 3,
-    Text = "[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [Ctrl+F] Favorite\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [h/?] All keys   [q] Quit" };
+    Text = "[Enter] Start   [e/F2] Edit   [d] Duplicate   [x] Delete   [n] New   [Ctrl+F] Favorite\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [h/?] All keys   [q] Quit" };
 var resourceStrip = new ResourceStripView { X = 1, Y = Pos.Bottom(help), Width = Dim.Fill(2) };
 win.Add(banner, profileFrame, logFrame, statusFrame, metricsFrame, help, resourceStrip);
 LltopTheme.Apply([profileFrame, logFrame, statusFrame, metricsFrame], banner, profileList, logView, status, metrics, help, logStatus);
@@ -83,8 +83,8 @@ void ApplyLayout()
     var helpHeight = expandedHelp ? 6 : 2;
     help.Height = helpHeight;
     help.Text = expandedHelp
-        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e] Edit   [d] Duplicate   [x] Delete   [Ctrl+F] Favorite/unfavorite   [Ctrl+R/F5] Find models\nBENCHMARK   [b] Setup/start   [B] Cancel   idle server required   reports → benchmarks_dir\nLOG & RUNS  [g] Resource graph   [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nTHEME       [t] Cycle theme ({LltopTheme.CurrentName})   [h/?] Show fewer keys"
-        : $"[Enter] Start   [e] Edit   [d] Duplicate   [x] Delete   [n] New   [Ctrl+F] Favorite\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [t] Theme: {LltopTheme.CurrentName}   [h/?] All keys   [q] Quit";
+        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e/F2] Edit   [d] Duplicate   [x] Delete   [Ctrl+F] Favorite/unfavorite   [Ctrl+R/F5] Find models\nBENCHMARK   [b] Setup/start   [B] Cancel   idle server required   reports → benchmarks_dir\nLOG & RUNS  [g] Resource graph   [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nTHEME       [t] Cycle theme ({LltopTheme.CurrentName})   [h/?] Show fewer keys"
+        : $"[Enter] Start   [e/F2] Edit   [d] Duplicate   [x] Delete   [n] New   [Ctrl+F] Favorite\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [t] Theme: {LltopTheme.CurrentName}   [h/?] All keys   [q] Quit";
     var narrow = win.Viewport.Width is > 0 and < 84;
     var reserved = (narrow ? 20 : 10) + helpHeight + 1;
     if (narrow)
@@ -423,7 +423,7 @@ void RefreshModels()
         if (result.ModelsFound == 0)
         {
             ReloadProfiles(message: $"No compatible models found in {cfg.ModelsDir}.");
-            MessageBox.Query(app, "Model discovery", $"No compatible GGUF or BIN models were found in:\n{cfg.ModelsDir}\n\nlltop scans up to {FirstRunProfiles.ModelSearchDepth} folders deep and skips unreadable files, mmproj files, and paths matched by .llmignore.", "OK");
+            MessageBox.Query(app, "Model discovery", $"No verified GGUF language models were found in:\n{cfg.ModelsDir}\n\nlltop scans up to {FirstRunProfiles.ModelSearchDepth} folders deep and skips invalid, non-language, projector, and ignored files.", "OK");
             return;
         }
         var message = result.ProfilesCreated == 0
@@ -561,7 +561,7 @@ async Task RunBenchmark()
             var completed = update.Cases.Count(x => x.Status is not BenchmarkCaseStatus.Pending and not BenchmarkCaseStatus.Running);
             UpdateStatus($"Benchmark {completed}/{update.Cases.Count}: {update.Cases.FirstOrDefault(x => x.Status == BenchmarkCaseStatus.Running)?.Label ?? update.Status.ToString()}");
             RefreshLogs();
-        }), benchmarkCancellation.Token);
+        }), benchmarkCancellation.Token, saveHtml: false);
         var selectedContext = await PickContextForCacheLayer(benchmark);
         if (selectedContext is null)
         {
@@ -587,7 +587,12 @@ async Task RunBenchmark()
             var completed = update.Cases.Count(x => x.Status is not BenchmarkCaseStatus.Pending and not BenchmarkCaseStatus.Running);
             UpdateStatus($"Cache/math benchmark {completed}/{update.Cases.Count}: {update.Cases.FirstOrDefault(x => x.Status == BenchmarkCaseStatus.Running)?.Label ?? update.Status.ToString()}");
             RefreshLogs();
-        }), benchmarkCancellation.Token);
+        }), benchmarkCancellation.Token, saveHtml: false);
+        var combinedHtmlReport = BenchmarkReport.SaveCombinedHtml(cfg.BenchmarksDir, benchmark, cacheBenchmark);
+        benchmark.HtmlReport = combinedHtmlReport;
+        cacheBenchmark.HtmlReport = combinedHtmlReport;
+        BenchmarkStore.SaveJson(cfg.BenchmarksDir, benchmark);
+        BenchmarkStore.SaveJson(cfg.BenchmarksDir, cacheBenchmark);
         app.Invoke(() =>
         {
             UpdateStatus($"Cache and math benchmark {cacheBenchmark.Status}. Reports: {cacheBenchmark.HtmlReport}");
@@ -609,7 +614,7 @@ Task<Profile?> PickContextForCacheLayer(BenchmarkRecord benchmark)
     var completion = new TaskCompletionSource<Profile?>();
     app.Invoke(() =>
     {
-        ShowBenchmarkResults(app, benchmark);
+        ShowBenchmarkResults(app, benchmark, continuesToCacheAndMath: true);
         var candidates = benchmark.Cases.Where(x => x.Status == BenchmarkCaseStatus.Completed && x.Setting == "ctx").ToList();
         if (candidates.Count == 0)
         {
@@ -680,6 +685,7 @@ void EditSelected()
     try { store.Save(edited); ReloadProfiles(edited.Name, $"Saved profile {edited.Name}."); }
     catch (Exception ex) { UpdateStatus(ex.Message); }
 }
+
 
 void DuplicateSelected()
 {
@@ -828,6 +834,7 @@ app.Keyboard.KeyDown += (_, key) =>
     else if (text.Equals("r", StringComparison.OrdinalIgnoreCase)) { _ = Launch(true); key.Handled = true; }
     else if (text == "n") { NewProfile(); key.Handled = true; }
     else if (text.Equals("e", StringComparison.OrdinalIgnoreCase)) { EditSelected(); key.Handled = true; }
+    else if (key.KeyCode == KeyCode.F2) { EditSelected(); key.Handled = true; }
     else if (text.Equals("d", StringComparison.OrdinalIgnoreCase)) { DuplicateSelected(); key.Handled = true; }
     else if (text.Equals("x", StringComparison.OrdinalIgnoreCase)) { DeleteSelected(); key.Handled = true; }
     else if (text.Equals("p", StringComparison.OrdinalIgnoreCase))
@@ -936,96 +943,205 @@ runner.Dispose();
 
 static bool EditProfile(IApplication app, Profile profile, string title)
 {
-    var dialog = new Window { Title = $" {title} ", Width = 96, Height = 60 };
+    var editorOpen = true;
+    var dialog = new Window { Title = $" {title} ", X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
     var fields = new Dictionary<string, TextField>();
-    TextField Field(string label, string value, int y, int x = 2, int width = 42)
+    TextField Field(View page, string key, string label, string value, int x, int y, int width)
     {
-        dialog.Add(new Label { X = x, Y = y, Text = label });
-        var field = new TextField { X = x, Y = y + 1, Width = width, Text = value };
-        dialog.Add(field); fields[label] = field; return field;
+        page.Add(new Label { X = x, Y = y, Text = label });
+        var field = new TextField { X = x + label.Length + 1, Y = y, Width = width, Text = value };
+        page.Add(field); fields[key] = field; return field;
     }
-    string T(string label) => fields[label].Text;
-    var name = Field("Name", profile.Name, 1);
-    Field("Description", profile.Description, 1, 49, 43);
-    Field("Model path", profile.Model, 4, 2, 90);
-    var mmproj = Field("Vision projector (mmproj)", profile.Mmproj, 7, 2, 72);
-    var findMmproj = new Button { X = 76, Y = 8, Text = "Find sibling" };
-    dialog.Add(findMmproj);
-    Field("llama-server override (blank = global)", profile.LlamaServer, 10, 2, 90);
-    Field("Host", profile.Host, 13); Field("Port", profile.Port.ToString(), 13, 49);
-    Field("Context", profile.Ctx.ToString(), 16); Field("GPU layers", profile.Ngl.ToString(), 16, 49);
-    Field("Parallel", profile.Parallel.ToString(), 19); Field("Threads (0 = auto)", profile.Threads.ToString(), 19, 49);
-    Field("Flash attention (auto/on/off)", profile.FlashAttn, 22); Field("Alias", profile.Alias, 22, 49);
-    Field("Cache K (q4_0/q8_0/f16/blank)", profile.CacheK, 25); Field("Cache V (q4_0/q8_0/f16/blank)", profile.CacheV, 25, 49);
-    Field("Temperature", profile.Temp.ToString(CultureInfo.InvariantCulture), 28); Field("Top P", profile.TopP.ToString(CultureInfo.InvariantCulture), 28, 49);
-    Field("Top K", profile.TopK.ToString(), 31); Field("Min P", profile.MinP.ToString(CultureInfo.InvariantCulture), 31, 49);
-    Field("Repeat penalty", profile.RepeatPenalty.ToString(CultureInfo.InvariantCulture), 34); Field("Repeat last N", profile.RepeatLastN.ToString(), 34, 49);
-    Field("Presence penalty", profile.PresencePenalty.ToString(CultureInfo.InvariantCulture), 37); Field("Frequency penalty", profile.FrequencyPenalty.ToString(CultureInfo.InvariantCulture), 37, 49);
-    Field("Batch", profile.Batch.ToString(), 40); Field("Micro batch", profile.UBatch.ToString(), 40, 49);
-    Field("Chat template", profile.ChatTemplate, 43); Field("Reasoning / budget", $"{profile.Reasoning} {profile.ReasoningBudget}", 43, 49);
-    Field("MTP (on/off)", profile.Mtp ? "on" : "off", 46); Field("MTP draft tokens", profile.MtpDraftTokens.ToString(), 46, 49);
-    Field("Image min tokens (0 = default)", profile.ImageMinTokens.ToString(), 49); Field("Context checkpoints", profile.CtxCheckpoints.ToString(), 49, 49);
-    Field("Extra args (quoted when needed)", ArgumentText.Format(profile.ExtraArgs), 52, 2, 90);
-    Field("Tags (comma separated, shown in the profile list)", string.Join(", ", profile.Tags), 54, 2, 90);
-    var vision = new CheckBox { X = 2, Y = 56, Text = "Use vision", Value = profile.Vision ? CheckState.Checked : CheckState.UnChecked };
-    var jinja = new CheckBox { X = 20, Y = 56, Text = "Jinja", Value = profile.Jinja ? CheckState.Checked : CheckState.UnChecked };
-    var metrics = new CheckBox { X = 36, Y = 56, Text = "Metrics", Value = profile.Metrics ? CheckState.Checked : CheckState.UnChecked };
-    var mmap = new CheckBox { X = 52, Y = 56, Text = "Disable mmap", Value = profile.NoMmap ? CheckState.Checked : CheckState.UnChecked };
-    dialog.Add(vision, jinja, metrics, mmap);
-    var message = new Label { X = 2, Y = 57, Width = 65, Text = "Vision: supported Qwen model + matching mmproj-BF16.gguf." };
-    var save = new Button { X = 68, Y = 57, Text = "Save", IsDefault = true };
-    var cancel = new Button { X = Pos.Right(save) + 1, Y = 57, Text = "Cancel" };
-    dialog.Add(message, save, cancel);
+    string T(string key) => fields[key].Text;
+
+    var tabs = new Tabs { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(3) };
+    var general = new View { Title = " General ", ViewportSettings = ViewportSettingsFlags.HasScrollBars };
+    general.SetContentSize(new System.Drawing.Size(100, 27));
+    var reasoningPage = new View { Title = " Reasoning ", ViewportSettings = ViewportSettingsFlags.HasScrollBars };
+    reasoningPage.SetContentSize(new System.Drawing.Size(100, 34));
+    var flash = new View { Title = " Flash-attn " };
+    var mtpPage = new View { Title = " MTP " };
+    tabs.Add(general, reasoningPage, flash, mtpPage);
+    dialog.Add(tabs);
+
+    general.Add(new Label { X = 2, Y = 1, Text = "Model, server, sampling, template, vision, and metadata" });
+    var name = Field(general, "name", "Name", profile.Name, 2, 3, 30);
+    Field(general, "description", "Description", profile.Description, 46, 3, 38);
+    Field(general, "model", "Model", profile.Model, 2, 5, 86);
+    Field(general, "server", "Server", profile.LlamaServer, 2, 7, 34);
+    Field(general, "alias", "Alias", profile.Alias, 50, 7, 30);
+    Field(general, "host", "Host", profile.Host, 2, 9, 16); Field(general, "port", "Port", profile.Port.ToString(), 29, 9, 6);
+    Field(general, "ctx", "Context", profile.Ctx.ToString(), 46, 9, 8); Field(general, "ngl", "GPU layers", profile.Ngl.ToString(), 67, 9, 5);
+    Field(general, "template", "Template", profile.ChatTemplate, 2, 11, 25);
+    Field(general, "temp", "Temperature", profile.Temp.ToString(CultureInfo.InvariantCulture), 2, 13, 7); Field(general, "topP", "Top-P", profile.TopP.ToString(CultureInfo.InvariantCulture), 25, 13, 7); Field(general, "topK", "Top-K", profile.TopK.ToString(), 43, 13, 7); Field(general, "minP", "Min-P", profile.MinP.ToString(CultureInfo.InvariantCulture), 61, 13, 7);
+    Field(general, "repeatPenalty", "Repeat penalty", profile.RepeatPenalty.ToString(CultureInfo.InvariantCulture), 2, 15, 7); Field(general, "repeatLastN", "Repeat last N", profile.RepeatLastN.ToString(), 30, 15, 7); Field(general, "presence", "Presence", profile.PresencePenalty.ToString(CultureInfo.InvariantCulture), 54, 15, 7); Field(general, "frequency", "Frequency", profile.FrequencyPenalty.ToString(CultureInfo.InvariantCulture), 74, 15, 7);
+    var mmproj = Field(general, "mmproj", "Vision projector", profile.Mmproj, 2, 17, 65);
+    var findMmproj = new Button { X = 83, Y = 17, Text = "Find sibling" };
+    general.Add(findMmproj);
+    Field(general, "imageTokens", "Image min tokens", profile.ImageMinTokens.ToString(), 2, 19, 7);
+    Field(general, "extra", "Extra args", ArgumentText.Format(profile.ExtraArgs), 2, 21, 81);
+    Field(general, "tags", "Tags", string.Join(", ", profile.Tags), 2, 23, 87);
+    var vision = new CheckBox { X = 2, Y = 25, Text = "Use vision", Value = profile.Vision ? CheckState.Checked : CheckState.UnChecked };
+    var jinja = new CheckBox { X = 20, Y = 25, Text = "Jinja", Value = profile.Jinja ? CheckState.Checked : CheckState.UnChecked };
+    var metrics = new CheckBox { X = 34, Y = 25, Text = "Metrics", Value = profile.Metrics ? CheckState.Checked : CheckState.UnChecked };
+    var mmap = new CheckBox { X = 50, Y = 25, Text = "Disable mmap", Value = profile.NoMmap ? CheckState.Checked : CheckState.UnChecked };
+    general.Add(vision, jinja, metrics, mmap);
+
+    reasoningPage.Add(new Label { X = 2, Y = 1, Text = "Thinking mode, effort, and token budget" });
+    Field(reasoningPage, "reasoning", "Reasoning (auto/on/off)", profile.Reasoning, 2, 3, 9);
+    reasoningPage.Add(new Label { X = 2, Y = 4, Text = "auto: follow the chat template. on/off: request thinking enabled/disabled." });
+    reasoningPage.Add(new Label { X = 2, Y = 5, Text = "Requires model/template support. Blank leaves the server default." });
+    Field(reasoningPage, "effort", "Effort", profile.ReasoningEffort, 2, 7, 12);
+    var chooseEffort = new Button { X = 25, Y = 7, Text = "Choose effort...", Enabled = false };
+    var useMedium = new Button { X = 48, Y = 7, Text = "Use Medium", Visible = false };
+    reasoningPage.Add(chooseEffort, useMedium);
+    reasoningPage.Add(new Label { X = 2, Y = 8, Text = "Blank/default: template default. Supported levels depend on the model/template." });
+    reasoningPage.Add(new Label { X = 2, Y = 9, Text = "Analyze GGUF to unlock choices for this model. You can also enter an effort manually." });
+    reasoningPage.Add(new Label { X = 2, Y = 10, Text = "Low favors speed; higher effort favors depth. Budget sets the thinking ceiling." });
+    Field(reasoningPage, "budget", "Thinking budget (tokens)", profile.ReasoningBudget.ToString(), 2, 12, 9);
+    reasoningPage.Add(new Label { X = 2, Y = 13, Text = "-1: no thinking cap. 0: end thinking immediately. Positive: thinking token cap." });
+    reasoningPage.Add(new Label { X = 2, Y = 14, Text = "Example: 8000 caps thinking, then the answer continues. Output/context limits apply." });
+    reasoningPage.Add(new Label { X = 2, Y = 16, Text = "Style (explore alternatives, check assumptions, be brief): use your client's system prompt." });
+    var analyzeGguf = new Button { X = 2, Y = 18, Text = "Analyze GGUF" };
+    var reasoningAnalysis = new Label { X = 2, Y = 20, Width = 96, Height = 13, Text = "Not sure which effort to use? Analyze GGUF to find choices for your model.\nYour current mode, effort, and budget will be kept." };
+    var technicalDetails = new Button { X = 23, Y = 18, Text = "Technical details", Enabled = false };
+    reasoningPage.Add(analyzeGguf, technicalDetails, reasoningAnalysis);
+    GgufMetadata? analyzedMetadata = null;
+    string analyzedInputs = "";
+    string AnalysisInputs() => string.Join('\n', T("model"), T("template"), T("extra"), jinja.Value.ToString());
+    bool AnalysisIsCurrent()
+    {
+        if (analyzedMetadata is not null && analyzedInputs == AnalysisInputs()) return true;
+        reasoningAnalysis.Text = "Model or template settings changed. Analyze GGUF again to refresh the choices.";
+        chooseEffort.Enabled = false;
+        useMedium.Visible = false;
+        return false;
+    }
+    chooseEffort.Accepting += (_, _) =>
+    {
+        if (!AnalysisIsCurrent()) return;
+        var values = new[] { "" }.Concat(ReasoningAnalysis.EffortLevels(analyzedMetadata!)).ToArray();
+        var labels = values.Select(value => value switch
+        {
+            "" => "Default", "medium" => "Medium (balanced)", "low" => "Low (quicker)",
+            _ => char.ToUpperInvariant(value[0]) + value[1..]
+        }).Append("Cancel").ToArray();
+        var selected = MessageBox.Query(app, "Choose reasoning effort", "Choose the effort for this model. Default follows its template.\nYour thinking budget will stay unchanged. Press Save to keep the choice.", labels) ?? -1;
+        if (selected >= 0 && selected < values.Length)
+        {
+            fields["effort"].Text = values[selected];
+            reasoningAnalysis.Text = ReasoningAnalysis.Guidance(analyzedMetadata!, values[selected]);
+        }
+    };
+    useMedium.Accepting += (_, _) =>
+    {
+        if (!AnalysisIsCurrent()) return;
+        fields["effort"].Text = "medium";
+        reasoningAnalysis.Text = "Medium selected. Your thinking budget is unchanged. Press Save to keep this setting.";
+    };
+    technicalDetails.Accepting += (_, _) =>
+    {
+        if (AnalysisIsCurrent()) MessageBox.Query(app, "Reasoning technical details", ReasoningAnalysis.Describe(analyzedMetadata!) + "\nEffort uses --reasoning-effort, or template parameters on older server builds.", "OK");
+    };
+    analyzeGguf.Accepting += async (_, _) =>
+    {
+        var modelPath = AppConfig.Expand(T("model").Trim());
+        var hasOverride = !string.IsNullOrWhiteSpace(T("template")) || T("extra").Contains("--chat-template", StringComparison.Ordinal);
+        var usesJinja = jinja.Value == CheckState.Checked;
+        var inputSnapshot = AnalysisInputs();
+        analyzeGguf.Enabled = false;
+        chooseEffort.Enabled = false;
+        useMedium.Visible = false;
+        technicalDetails.Enabled = false;
+        reasoningAnalysis.Text = "Reading GGUF metadata...";
+        try
+        {
+            var metadata = await Task.Run(() => GgufMetadataReader.Read(modelPath));
+            app.Invoke(() =>
+            {
+                if (!editorOpen) return;
+                analyzedMetadata = metadata;
+                analyzedInputs = inputSnapshot;
+                if (!AnalysisIsCurrent()) return;
+                technicalDetails.Enabled = true;
+                reasoningAnalysis.Text = hasOverride
+                    ? "A custom template is configured in General.\nThe GGUF cannot confirm its effort choices. Keep your settings or inspect Technical details."
+                    : !usesJinja
+                        ? "Enable Jinja in General, then analyze again to get choices from the model's template.\nYour current settings have been kept."
+                        : ReasoningAnalysis.Guidance(metadata, T("effort"));
+                var levels = ReasoningAnalysis.EffortLevels(metadata);
+                chooseEffort.Enabled = !hasOverride && usesJinja && levels.Count > 0;
+                useMedium.Visible = chooseEffort.Enabled && levels.Contains("medium");
+            });
+        }
+        catch (Exception ex) { app.Invoke(() => { if (editorOpen) reasoningAnalysis.Text = $"Could not analyze GGUF: {ex.Message}"; }); }
+        finally { app.Invoke(() => { if (editorOpen) analyzeGguf.Enabled = true; }); }
+    };
+
+    flash.Add(new Label { X = 2, Y = 1, Text = "Attention, KV cache, and server batching" });
+    Field(flash, "flash", "Flash attention (auto/on/off)", profile.FlashAttn, 2, 4, 10);
+    Field(flash, "cacheK", "KV cache K", profile.CacheK, 2, 6, 12); Field(flash, "cacheV", "KV cache V", profile.CacheV, 33, 6, 12);
+    flash.Add(new Label { X = 2, Y = 8, Text = "q8_0 / q8_0: recommended quality baseline; uses about half the KV memory of f16 / f16." });
+    flash.Add(new Label { X = 2, Y = 9, Text = "q4_0 / q4_0: about half q8 KV memory; use it to fit more context, then check quality. q4_0 / q8_0 is a middle ground." });
+    Field(flash, "batch", "Batch", profile.Batch.ToString(), 2, 12, 8); Field(flash, "ubatch", "Micro batch", profile.UBatch.ToString(), 24, 12, 8); Field(flash, "parallel", "Parallel slots", profile.Parallel.ToString(), 49, 12, 6); Field(flash, "threads", "CPU threads", profile.Threads.ToString(), 72, 12, 6);
+    Field(flash, "checkpoints", "Context checkpoints", profile.CtxCheckpoints.ToString(), 2, 15, 6);
+    flash.Add(new Label { X = 2, Y = 18, Text = "Blank cache or flash values leave the matching llama.cpp option out of the launch command." });
+
+    mtpPage.Add(new Label { X = 2, Y = 1, Text = "Multi-token prediction / draft-MTP" });
+    Field(mtpPage, "mtp", "MTP (on/off)", profile.Mtp ? "on" : "off", 2, 4, 7);
+    Field(mtpPage, "mtpTokens", "Draft tokens", profile.MtpDraftTokens.ToString(), 2, 6, 7);
+    mtpPage.Add(new Label { X = 2, Y = 9, Text = "When on, lltop adds: --spec-type draft-mtp --spec-draft-n-max <draft tokens>" });
+    mtpPage.Add(new Label { X = 2, Y = 11, Text = "When off, draft tokens should be 0. When on, draft tokens must be at least 1." });
+
+    var message = new Label { X = 2, Y = Pos.AnchorEnd(1), Width = Dim.Fill(28), Text = "Select a tab with its header, Ctrl+Tab, or Ctrl+PageUp/PageDown." };
+    var defaults = new Button { X = Pos.AnchorEnd(37), Y = Pos.AnchorEnd(1), Text = "Default settings" };
+    var save = new Button { X = Pos.AnchorEnd(18), Y = Pos.AnchorEnd(1), Text = "Save", IsDefault = true };
+    var cancel = new Button { X = Pos.Right(save) + 1, Y = Pos.AnchorEnd(1), Text = "Cancel" };
+    dialog.Add(message, defaults, save, cancel);
     var accepted = false;
     findMmproj.Accepting += (_, _) =>
     {
-        var match = VisionProjectorResolver.FindBeside(AppConfig.Expand(T("Model path")));
+        var match = VisionProjectorResolver.FindBeside(AppConfig.Expand(T("model")));
         if (match.Path is not null) mmproj.Text = match.Path;
         message.Text = match.Message;
+    };
+    defaults.Accepting += (_, _) =>
+    {
+        var defaultsProfile = profile.Copy(profile.Name);
+        defaultsProfile.ApplyRecommendedSettings();
+        fields["ctx"].Text = defaultsProfile.Ctx.ToString(); fields["ngl"].Text = defaultsProfile.Ngl.ToString();
+        fields["temp"].Text = defaultsProfile.Temp.ToString(CultureInfo.InvariantCulture); fields["topP"].Text = defaultsProfile.TopP.ToString(CultureInfo.InvariantCulture); fields["topK"].Text = defaultsProfile.TopK.ToString(); fields["minP"].Text = defaultsProfile.MinP.ToString(CultureInfo.InvariantCulture);
+        fields["repeatPenalty"].Text = defaultsProfile.RepeatPenalty.ToString(CultureInfo.InvariantCulture); fields["repeatLastN"].Text = defaultsProfile.RepeatLastN.ToString(); fields["presence"].Text = defaultsProfile.PresencePenalty.ToString(CultureInfo.InvariantCulture); fields["frequency"].Text = defaultsProfile.FrequencyPenalty.ToString(CultureInfo.InvariantCulture);
+        fields["flash"].Text = defaultsProfile.FlashAttn; fields["cacheK"].Text = defaultsProfile.CacheK; fields["cacheV"].Text = defaultsProfile.CacheV;
+        fields["batch"].Text = defaultsProfile.Batch.ToString(); fields["ubatch"].Text = defaultsProfile.UBatch.ToString(); fields["parallel"].Text = defaultsProfile.Parallel.ToString(); fields["threads"].Text = defaultsProfile.Threads.ToString(); fields["checkpoints"].Text = defaultsProfile.CtxCheckpoints.ToString();
+        fields["reasoning"].Text = defaultsProfile.Reasoning; fields["budget"].Text = defaultsProfile.ReasoningBudget.ToString(); fields["mtp"].Text = "off"; fields["mtpTokens"].Text = "0";
+        fields["effort"].Text = defaultsProfile.ReasoningEffort;
+        jinja.Value = defaultsProfile.Jinja ? CheckState.Checked : CheckState.UnChecked; metrics.Value = defaultsProfile.Metrics ? CheckState.Checked : CheckState.UnChecked; mmap.Value = defaultsProfile.NoMmap ? CheckState.Checked : CheckState.UnChecked;
+        message.Text = "Recommended settings restored: Q8 KV cache, 64K context, conservative sampling. Model and connection details were kept.";
     };
     save.Accepting += (_, _) =>
     {
         try
         {
-            profile.Name = name.Text.Trim(); profile.Description = T("Description").Trim();
-            profile.Model = AppConfig.Expand(T("Model path"));
-            profile.Vision = vision.Value == CheckState.Checked;
-            profile.Mmproj = AppConfig.Expand(T("Vision projector (mmproj)"));
-            if (profile.Vision && string.IsNullOrWhiteSpace(profile.Mmproj))
-            {
-                var match = VisionProjectorResolver.FindBeside(profile.Model);
-                if (match.Path is null) throw new InvalidOperationException(match.Message);
-                profile.Mmproj = match.Path;
-            }
-            profile.LlamaServer = AppConfig.Expand(T("llama-server override (blank = global)"));
-            profile.Host = T("Host").Trim(); profile.Port = ParseInt(T("Port"), "Port");
-            profile.Ctx = ParseInt(T("Context"), "Context"); profile.Ngl = ParseInt(T("GPU layers"), "GPU layers");
-            profile.Parallel = ParseInt(T("Parallel"), "Parallel"); profile.Threads = ParseInt(T("Threads (0 = auto)"), "Threads");
-            profile.FlashAttn = T("Flash attention (auto/on/off)").Trim().ToLowerInvariant(); profile.Alias = T("Alias").Trim();
-            profile.CacheK = T("Cache K (q4_0/q8_0/f16/blank)").Trim(); profile.CacheV = T("Cache V (q4_0/q8_0/f16/blank)").Trim();
-            profile.Temp = ParseDouble(T("Temperature"), "Temperature"); profile.TopP = ParseDouble(T("Top P"), "Top P");
-            profile.TopK = ParseInt(T("Top K"), "Top K"); profile.MinP = ParseDouble(T("Min P"), "Min P");
-            profile.RepeatPenalty = ParseDouble(T("Repeat penalty"), "Repeat penalty"); profile.RepeatLastN = ParseInt(T("Repeat last N"), "Repeat last N");
-            profile.PresencePenalty = ParseDouble(T("Presence penalty"), "Presence penalty"); profile.FrequencyPenalty = ParseDouble(T("Frequency penalty"), "Frequency penalty");
-            profile.Batch = ParseInt(T("Batch"), "Batch"); profile.UBatch = ParseInt(T("Micro batch"), "Micro batch");
-            profile.ImageMinTokens = ParseInt(T("Image min tokens (0 = default)"), "Image minimum tokens");
-            profile.CtxCheckpoints = ParseInt(T("Context checkpoints"), "Context checkpoints");
-            profile.Mtp = ParseOnOff(T("MTP (on/off)"), "MTP");
-            profile.MtpDraftTokens = ParseInt(T("MTP draft tokens"), "MTP draft tokens");
-            profile.ChatTemplate = T("Chat template").Trim();
-            var reasoning = T("Reasoning / budget").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            profile.Reasoning = reasoning.FirstOrDefault() ?? "auto"; profile.ReasoningBudget = reasoning.Length > 1 ? ParseInt(reasoning[1], "Reasoning budget") : -1;
-            profile.ExtraArgs = ArgumentText.Parse(T("Extra args (quoted when needed)"));
-            profile.Tags = T("Tags (comma separated, shown in the profile list)").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-            profile.Jinja = jinja.Value == CheckState.Checked; profile.Metrics = metrics.Value == CheckState.Checked; profile.NoMmap = mmap.Value == CheckState.Checked;
+            profile.Name = name.Text.Trim(); profile.Description = T("description").Trim(); profile.Model = AppConfig.Expand(T("model")); profile.LlamaServer = AppConfig.Expand(T("server")); profile.Alias = T("alias").Trim(); profile.Host = T("host").Trim(); profile.Port = ParseInt(T("port"), "Port");
+            profile.Ctx = ParseInt(T("ctx"), "Context"); profile.Ngl = ParseInt(T("ngl"), "GPU layers"); profile.ChatTemplate = T("template").Trim(); profile.Reasoning = T("reasoning").Trim().ToLowerInvariant(); profile.ReasoningBudget = ParseInt(T("budget"), "Reasoning budget");
+            profile.ReasoningEffort = T("effort").Trim().ToLowerInvariant();
+            profile.Temp = ParseDouble(T("temp"), "Temperature"); profile.TopP = ParseDouble(T("topP"), "Top P"); profile.TopK = ParseInt(T("topK"), "Top K"); profile.MinP = ParseDouble(T("minP"), "Min P"); profile.RepeatPenalty = ParseDouble(T("repeatPenalty"), "Repeat penalty"); profile.RepeatLastN = ParseInt(T("repeatLastN"), "Repeat last N"); profile.PresencePenalty = ParseDouble(T("presence"), "Presence penalty"); profile.FrequencyPenalty = ParseDouble(T("frequency"), "Frequency penalty");
+            profile.Vision = vision.Value == CheckState.Checked; profile.Mmproj = AppConfig.Expand(T("mmproj")); profile.ImageMinTokens = ParseInt(T("imageTokens"), "Image minimum tokens");
+            if (profile.Vision && string.IsNullOrWhiteSpace(profile.Mmproj)) { var match = VisionProjectorResolver.FindBeside(profile.Model); if (match.Path is null) throw new InvalidOperationException(match.Message); profile.Mmproj = match.Path; }
+            profile.ExtraArgs = ArgumentText.Parse(T("extra")); profile.Tags = T("tags").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(); profile.Jinja = jinja.Value == CheckState.Checked; profile.Metrics = metrics.Value == CheckState.Checked; profile.NoMmap = mmap.Value == CheckState.Checked;
+            profile.FlashAttn = T("flash").Trim().ToLowerInvariant(); profile.CacheK = T("cacheK").Trim(); profile.CacheV = T("cacheV").Trim(); profile.Batch = ParseInt(T("batch"), "Batch"); profile.UBatch = ParseInt(T("ubatch"), "Micro batch"); profile.Parallel = ParseInt(T("parallel"), "Parallel slots"); profile.Threads = ParseInt(T("threads"), "CPU threads"); profile.CtxCheckpoints = ParseInt(T("checkpoints"), "Context checkpoints");
+            profile.Mtp = ParseOnOff(T("mtp"), "MTP"); profile.MtpDraftTokens = ParseInt(T("mtpTokens"), "MTP draft tokens");
             profile.Validate(); accepted = true; app.RequestStop();
         }
         catch (Exception ex) { message.Text = ex.Message; }
     };
     cancel.Accepting += (_, _) => app.RequestStop();
-    app.Run(dialog);
+    try { app.Run(dialog); }
+    finally { editorOpen = false; }
     return accepted;
 }
+
 
 static int ParseInt(string value, string name) => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : throw new FormatException($"{name} must be a whole number.");
 static bool ParseOnOff(string value, string name) => value.Trim().ToLowerInvariant() switch
@@ -1241,14 +1357,14 @@ static bool ShowVisionSetup(IApplication app, Profile profile)
 
 static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
 {
-    var wizard = new Window { Title = " Welcome to lltop ", Width = 90, Height = 19 };
-    wizard.Add(new Label { X = 2, Y = 1, Text = "Connect lltop to your llama.cpp installation." });
+    var wizard = new Window { Title = " Setup · step 1 of 2 ", Width = 90, Height = 19 };
+    wizard.Add(new Label { X = 2, Y = 1, Text = "Step 1: connect lltop to your llama.cpp installation. Next, you will review the models found." });
     wizard.Add(new Label { X = 2, Y = 3, Text = "llama-server binary or app directory" });
     var server = new TextField { X = 2, Y = 4, Width = Dim.Fill(4), Text = "~/llama/app" };
     wizard.Add(server, new Label { X = 2, Y = 6, Text = "Models directory" });
     var models = new TextField { X = 2, Y = 7, Width = Dim.Fill(4), Text = "~/llama/models" };
     var message = new Label { X = 2, Y = 10, Width = Dim.Fill(4), Height = 2, Text = "Both paths must already exist. Esc cancels setup." };
-    var save = new Button { X = 2, Y = 14, Text = "Save and continue", IsDefault = true };
+    var save = new Button { X = 2, Y = 14, Text = "Next: review models", IsDefault = true };
     var cancel = new Button { X = Pos.Right(save) + 2, Y = 14, Text = "Cancel" };
     wizard.Add(models, message, save, cancel);
     var completed = false;
@@ -1261,6 +1377,8 @@ static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
             var modelsPath = AppConfig.Expand(models.Text);
             if (!File.Exists(serverPath)) throw new InvalidOperationException("llama-server was not found at that location.");
             if (!Directory.Exists(modelsPath)) throw new InvalidOperationException("Models directory was not found.");
+            var inspection = FirstRunProfiles.InspectModels(modelsPath).Where(model => model.IsRunnable).ToList();
+            if (!ShowFirstRunModelReview(app, modelsPath, inspection)) return;
             cfg.LlamaServer = serverPath;
             cfg.ModelsDir = modelsPath;
             cfg.Save();
@@ -1273,6 +1391,32 @@ static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
     cancel.Accepting += (_, _) => app.RequestStop();
     app.Run(wizard);
     return completed;
+}
+
+static bool ShowFirstRunModelReview(IApplication app, string modelsPath, IReadOnlyList<ModelInspection> models)
+{
+    var review = new Window { Title = " Setup · step 2 of 2 · review models ", Width = 100, Height = 24 };
+    var runnable = models.Count(model => model.IsRunnable);
+    review.Add(new Label
+    {
+        X = 2, Y = 1, Width = Dim.Fill(4),
+        Text = $"Step 2: review the verified GGUF language models before entering lltop. Found {runnable} model{(runnable == 1 ? "" : "s")} in {modelsPath}."
+    });
+    review.Add(new Label { X = 2, Y = 3, Text = "Only verified GGUF language models are shown and will receive profiles." });
+    var items = new ObservableCollection<string>(models.Select(model =>
+        $"{(model.IsRunnable ? "✓" : "!")} {Path.GetFileName(model.Path),-42}  {model.Status}"));
+    if (items.Count == 0) items.Add("No verified GGUF language models found.");
+    var list = new ListView { X = 2, Y = 5, Width = Dim.Fill(4), Height = 11 };
+    list.SetSource(items);
+    var continueButton = new Button { X = 2, Y = 18, Text = "Create profiles and continue", IsDefault = true };
+    var back = new Button { X = Pos.Right(continueButton) + 2, Y = 18, Text = "Back" };
+    var confirmed = false;
+    continueButton.Accepting += (_, _) => { confirmed = true; app.RequestStop(); };
+    back.Accepting += (_, _) => app.RequestStop();
+    review.KeyDown += (_, key) => { if (key.KeyCode == KeyCode.Esc) { app.RequestStop(); key.Handled = true; } };
+    review.Add(list, continueButton, back);
+    app.Run(review);
+    return confirmed;
 }
 
 static BenchmarkSetup? ShowBenchmarkSetup(IApplication app, Profile profile)
@@ -1323,14 +1467,19 @@ static BenchmarkSetup? ShowBenchmarkSetup(IApplication app, Profile profile)
     return setup;
 }
 
-static void ShowBenchmarkResults(IApplication app, BenchmarkRecord benchmark)
+static void ShowBenchmarkResults(IApplication app, BenchmarkRecord benchmark, bool continuesToCacheAndMath = false)
 {
-    var window = new Window { Title = $" Benchmark results · {benchmark.ProfileName} ", Width = Dim.Percent(90), Height = Dim.Percent(80) };
+    var title = continuesToCacheAndMath
+        ? $" Benchmark · phase 1 of 2 · context results · {benchmark.ProfileName} "
+        : $" Benchmark results · {benchmark.ProfileName} ";
+    var window = new Window { Title = title, Width = Dim.Percent(90), Height = Dim.Percent(80) };
     window.KeyDown += (_, key) => { if (key.KeyCode == KeyCode.Esc || key.AsGrapheme.Equals("q", StringComparison.OrdinalIgnoreCase)) { app.RequestStop(); key.Handled = true; } };
     var warnings = benchmark.Cases.Where(x => BenchmarkReport.Headroom(x).StartsWith("WARNING", StringComparison.Ordinal) || BenchmarkReport.Headroom(x).StartsWith("CRITICAL", StringComparison.Ordinal)).ToList();
     var peak = benchmark.Cases.Where(x => x.VramUsedBytes.HasValue).OrderByDescending(x => x.VramUsedBytes).FirstOrDefault();
-    var lines = new List<string>
-    {
+    var lines = new List<string>();
+    if (continuesToCacheAndMath)
+        lines.AddRange(["Phase 1 of 2 complete. Next, choose a context result for the cache + math benchmark.", ""]);
+    lines.AddRange([
         $"Status       {benchmark.Status}",
         $"Cases        {benchmark.Cases.Count(x => x.Status == BenchmarkCaseStatus.Completed)}/{benchmark.Cases.Count} completed",
         $"Memory fit   {BenchmarkReport.MemoryPosture(benchmark, peak)}",
@@ -1339,19 +1488,22 @@ static void ShowBenchmarkResults(IApplication app, BenchmarkRecord benchmark)
         "",
         "CASE                         STATUS        MATH     POST-WARMUP VRAM                 HEADROOM / RISK",
         new string('─', 92)
-    };
+    ]);
     lines.AddRange(benchmark.Cases.Select(x => $"{x.Label,-28} {x.Status,-13} {(x.MathTotal is null ? "—" : $"{x.MathCorrect}/{x.MathTotal}"),-8} {BenchmarkReport.FormatVram(x),-34} {BenchmarkReport.Headroom(x)}{(x.Error.Length > 0 ? $"  {x.Error}" : "")}"));
-    lines.AddRange(["", "Reports", $"HTML  {benchmark.HtmlReport}", $"JSON  {benchmark.JsonReport}", "", "Close-to-OOM means peak sampled VRAM was at least 80% of reported total GPU VRAM."]);
+    lines.AddRange(["", "Reports", $"JSON  {benchmark.JsonReport}"]);
+    if (!string.IsNullOrWhiteSpace(benchmark.HtmlReport)) lines.Add($"HTML  {benchmark.HtmlReport}");
+    lines.AddRange(["", "Close-to-OOM means peak sampled VRAM was at least 80% of reported total GPU VRAM."]);
     var results = new LogTextView { X = 1, Y = 1, Width = Dim.Fill(2), Height = Dim.Fill(3), ReadOnly = true, WordWrap = true,
         Text = string.Join('\n', lines), HighlightSeverityMarkersOnly = true };
     LltopTheme.ApplyAnalysis(results);
-    var openReport = new Button { X = 1, Y = Pos.Bottom(results), Text = "Open HTML report" };
+    var hasHtmlReport = !string.IsNullOrWhiteSpace(benchmark.HtmlReport);
+    var openReport = new Button { X = 1, Y = Pos.Bottom(results), Text = "Open HTML report", Visible = hasHtmlReport };
     openReport.Accepting += (_, _) =>
     {
         try { LaunchBenchmarkReport(benchmark.HtmlReport); }
         catch (Exception ex) { MessageBox.ErrorQuery(app, "Open benchmark report", ex.Message, "OK"); }
     };
-    var close = new Button { X = Pos.Right(openReport) + 2, Y = Pos.Bottom(results), Text = "Close", IsDefault = true };
+    var close = new Button { X = hasHtmlReport ? Pos.Right(openReport) + 2 : 1, Y = Pos.Bottom(results), Text = continuesToCacheAndMath ? "Next: choose cache context" : "Close", IsDefault = true };
     close.Accepting += (_, _) => app.RequestStop();
     window.Add(results, openReport, close); app.Run(window);
 }

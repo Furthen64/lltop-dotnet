@@ -93,6 +93,21 @@ public sealed class BenchmarkTests
     }
 
     [Fact]
+    public void CombinedReport_ContainsBothBenchmarkPhases()
+    {
+        var context = new BenchmarkRecord { ProfileName = "profile", Cases = [new BenchmarkCase { Label = "ctx 32K" }] };
+        var cacheAndMath = new BenchmarkRecord { ProfileName = "profile", Cases = [new BenchmarkCase { Label = "q8_0 / q8_0" }] };
+
+        var html = BenchmarkReport.CombinedHtml(context, cacheAndMath);
+
+        Assert.Contains("Phase 1 of 2: context sweep", html);
+        Assert.Contains("Phase 2 of 2: cache + math", html);
+        Assert.Contains("ctx 32K", html);
+        Assert.Contains("q8_0 / q8_0", html);
+        Assert.Single(html.Split("<!doctype html>", StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    [Fact]
     public void Report_LabelsCloseToOomHeadroom()
     {
         var warning = new BenchmarkCase { TelemetryAvailable = true, VramUsedBytes = 13, VramTotalBytes = 16 };
