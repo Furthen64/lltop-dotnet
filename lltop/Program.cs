@@ -8,6 +8,22 @@ using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
+SingleInstanceLock? instanceLock;
+try { instanceLock = SingleInstanceLock.TryAcquire(); }
+catch (Exception ex)
+{
+    Console.Error.WriteLine($"lltop could not acquire its instance lock: {ex.Message}");
+    Environment.ExitCode = 1;
+    return;
+}
+using var instanceLease = instanceLock;
+if (instanceLease is null)
+{
+    Console.Error.WriteLine("lltop is already running on this host. Close the existing instance before starting another.");
+    Environment.ExitCode = 1;
+    return;
+}
+
 using var app = Application.Create().Init();
 var cfg = AppConfig.Load();
 var knownTheme = LltopTheme.Select(cfg.Theme);
@@ -106,6 +122,10 @@ void ApplyLayout()
     resourceStrip.Y = Pos.Bottom(help);
 }
 win.ViewportChanged += (_, _) => { ApplyLayout(); RefreshProfileItems(runningProfile); };
+// A window viewport notification occurs before its child views necessarily receive
+// their final dimensions. Rebuild once the list itself is laid out so the padded
+// profile rows use the visible width rather than the startup fallback width.
+profileList.ViewportChanged += (_, _) => RefreshProfileItems(runningProfile);
 ApplyLayout();
 
 void RefreshProfileItems(string? selectName = null)
