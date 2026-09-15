@@ -80,7 +80,7 @@ not a benchmark case, and a context point that exactly matches it is skipped.
 
 After the context sweep, inspect the results and choose a completed context
 case to continue. lltop then runs a KV-cache layer at that chosen context using
-`q4_0/q4_0`, `q8_0/q8_0`, `f16/f16`, `iq4_nl/iq4_nl`, and `q4_0/q8_0` cache
+the matched `q4_0/q4_0`, `q8_0/q8_0`, `f16/f16`, and `iq4_nl/iq4_nl` cache
 K/V combinations. Each cache case also runs a three-question, deterministic
 multi-step arithmetic suite; the terminal and HTML report show its score (for
 example, `3/3`) beside VRAM headroom.
@@ -92,6 +92,22 @@ server and records cancellation. OOM outcomes can stop the remaining cases or
 continue, as chosen in setup. Benchmark executions are not added to normal run
 history. Each layer produces JSON and self-contained HTML reports in
 `benchmarks_dir` (`~/.config/lltop/benchmarks` by default).
+
+## Qwen3.8 CUDA profile note
+
+Keep KV-cache K and V formats matched when benchmarking Qwen3.8-27B-UD on
+CUDA. On an RTX 4070 Ti SUPER using the IQ3_XXS GGUF, `q8_0/q8_0` sustained
+roughly 1,300–1,500 prompt tokens/s and 45–50 generated tokens/s. Changing
+only V to `q4_0` (`q8_0/q4_0`) reduced prompt processing to roughly 80–150
+tokens/s and shifted substantial work to the CPU. This is a model/backend
+specific result, not a claim about every GGUF model, but it makes mixed cache
+formats a poor automatic benchmark default.
+
+The validated vision profile kept `--mmproj`, `--flash-attn on`, and MTP
+enabled while using `q8_0/q8_0`; none of those settings caused the regression.
+For long local agent sessions, lltop profiles now pass `--timeout 3600` by
+default. Configure the client-side request/header/chunk deadlines to exceed
+that value as well.
 
 ## Theme
 

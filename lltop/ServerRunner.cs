@@ -223,6 +223,7 @@ sealed class ServerRunner : IDisposable
         if (p.ImageMinTokens > 0) segments.Add(new(["--image-min-tokens", p.ImageMinTokens.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "image minimum tokens"));
         segments.Add(new(["--port", p.Port.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "port"));
         Pair("--host", p.Host, "host");
+        segments.Add(new(["--timeout", p.Timeout.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "server timeout"));
         Pair("-a", p.Alias, "alias");
         segments.Add(new(["-c", p.Ctx.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "context"));
         segments.Add(new(["-ngl", p.Ngl.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "gpu layers"));

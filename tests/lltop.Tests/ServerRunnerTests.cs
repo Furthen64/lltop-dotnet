@@ -23,6 +23,15 @@ public sealed class ServerRunnerTests
         Assert.Equal("96", args[args.IndexOf("--repeat-last-n") + 1]);
         Assert.Equal("0.2", args[args.IndexOf("--presence-penalty") + 1]);
         Assert.Equal("0.3", args[args.IndexOf("--frequency-penalty") + 1]);
+        Assert.Equal("3600", args[args.IndexOf("--timeout") + 1]);
+    }
+
+    [Fact]
+    public void BuildArguments_UsesConfiguredServerTimeout()
+    {
+        var args = ServerRunner.BuildArguments(new Profile { Model = "/models/test.gguf", Timeout = 7200 }).ToList();
+
+        Assert.Equal("7200", args[args.IndexOf("--timeout") + 1]);
     }
 
     [Fact]

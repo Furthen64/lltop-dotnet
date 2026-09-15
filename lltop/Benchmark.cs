@@ -115,8 +115,7 @@ internal static class BenchmarkCases
         CacheCase(contextProfile, "q4_0", "q4_0"),
         CacheCase(contextProfile, "q8_0", "q8_0"),
         CacheCase(contextProfile, "f16", "f16"),
-        CacheCase(contextProfile, "iq4_nl", "iq4_nl"),
-        CacheCase(contextProfile, "q4_0", "q8_0")
+        CacheCase(contextProfile, "iq4_nl", "iq4_nl")
     ];
 
     static BenchmarkCase CacheCase(Profile contextProfile, string cacheK, string cacheV)

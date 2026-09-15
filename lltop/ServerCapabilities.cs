@@ -206,7 +206,7 @@ static class ServerCapabilityParser
     static readonly HashSet<string> SafeFallbackOptions =
     [
         "-m", "--model", "--host", "--port", "-a", "-c", "-ngl", "--temp", "--top-p", "--top-k", "--min-p",
-        "-b", "-ub", "--parallel", "--threads", "--metrics", "--no-mmap", "--chat-template"
+        "-b", "-ub", "--parallel", "--threads", "--timeout", "--metrics", "--no-mmap", "--chat-template"
     ];
 
     static readonly Dictionary<string, bool> KnownOptionArity = new(StringComparer.Ordinal)
@@ -214,7 +214,7 @@ static class ServerCapabilityParser
         ["-m"] = true, ["--model"] = true, ["--host"] = true, ["--port"] = true, ["-a"] = true, ["-c"] = true,
         ["-ngl"] = true, ["--cache-type-k"] = true, ["--cache-type-v"] = true, ["--flash-attn"] = true, ["-fa"] = true,
         ["--temp"] = true, ["--top-p"] = true, ["--top-k"] = true, ["--min-p"] = true, ["-b"] = true, ["-ub"] = true,
-        ["--parallel"] = true, ["--threads"] = true, ["--chat-template"] = true, ["--reasoning"] = true,
+        ["--parallel"] = true, ["--threads"] = true, ["--timeout"] = true, ["--chat-template"] = true, ["--reasoning"] = true,
         ["--ctx-checkpoints"] = true, ["--reasoning-budget"] = true, ["--threads-http"] = true, ["--device"] = true, ["--main-gpu"] = true,
         ["-mg"] = true, ["--split-mode"] = true, ["-sm"] = true, ["--tensor-split"] = true, ["-ts"] = true,
         ["--metrics"] = false, ["--jinja"] = false, ["--no-mmap"] = false, ["--verbose"] = false

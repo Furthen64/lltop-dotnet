@@ -1102,10 +1102,10 @@ static bool EditProfile(IApplication app, Profile profile, string title)
     Field(flash, "flash", "Flash attention (auto/on/off)", profile.FlashAttn, 2, 4, 10);
     Field(flash, "cacheK", "KV cache K", profile.CacheK, 2, 6, 12); Field(flash, "cacheV", "KV cache V", profile.CacheV, 33, 6, 12);
     flash.Add(new Label { X = 2, Y = 8, Text = "q8_0 / q8_0: recommended quality baseline; uses about half the KV memory of f16 / f16." });
-    flash.Add(new Label { X = 2, Y = 9, Text = "q4_0 / q4_0: about half q8 KV memory; use it to fit more context, then check quality. q4_0 / q8_0 is a middle ground." });
+    flash.Add(new Label { X = 2, Y = 9, Text = "q4_0 / q4_0: about half q8 KV memory; use it to fit more context, then check quality." });
     Field(flash, "batch", "Batch", profile.Batch.ToString(), 2, 12, 8); Field(flash, "ubatch", "Micro batch", profile.UBatch.ToString(), 24, 12, 8); Field(flash, "parallel", "Parallel slots", profile.Parallel.ToString(), 49, 12, 6); Field(flash, "threads", "CPU threads", profile.Threads.ToString(), 72, 12, 6);
-    Field(flash, "checkpoints", "Context checkpoints", profile.CtxCheckpoints.ToString(), 2, 15, 6);
-    flash.Add(new Label { X = 2, Y = 18, Text = "Blank cache or flash values leave the matching llama.cpp option out of the launch command." });
+    Field(flash, "checkpoints", "Context checkpoints", profile.CtxCheckpoints.ToString(), 2, 15, 6); Field(flash, "timeout", "Server timeout (s)", profile.Timeout.ToString(), 33, 15, 7);
+    flash.Add(new Label { X = 2, Y = 18, Text = "The one-hour server timeout allows slow prefill before the first response token. Blank cache or flash values omit those matching options." });
 
     mtpPage.Add(new Label { X = 2, Y = 1, Text = "Multi-token prediction / draft-MTP" });
     Field(mtpPage, "mtp", "MTP (on/off)", profile.Mtp ? "on" : "off", 2, 4, 7);
@@ -1133,7 +1133,7 @@ static bool EditProfile(IApplication app, Profile profile, string title)
         fields["temp"].Text = defaultsProfile.Temp.ToString(CultureInfo.InvariantCulture); fields["topP"].Text = defaultsProfile.TopP.ToString(CultureInfo.InvariantCulture); fields["topK"].Text = defaultsProfile.TopK.ToString(); fields["minP"].Text = defaultsProfile.MinP.ToString(CultureInfo.InvariantCulture);
         fields["repeatPenalty"].Text = defaultsProfile.RepeatPenalty.ToString(CultureInfo.InvariantCulture); fields["repeatLastN"].Text = defaultsProfile.RepeatLastN.ToString(); fields["presence"].Text = defaultsProfile.PresencePenalty.ToString(CultureInfo.InvariantCulture); fields["frequency"].Text = defaultsProfile.FrequencyPenalty.ToString(CultureInfo.InvariantCulture);
         fields["flash"].Text = defaultsProfile.FlashAttn; fields["cacheK"].Text = defaultsProfile.CacheK; fields["cacheV"].Text = defaultsProfile.CacheV;
-        fields["batch"].Text = defaultsProfile.Batch.ToString(); fields["ubatch"].Text = defaultsProfile.UBatch.ToString(); fields["parallel"].Text = defaultsProfile.Parallel.ToString(); fields["threads"].Text = defaultsProfile.Threads.ToString(); fields["checkpoints"].Text = defaultsProfile.CtxCheckpoints.ToString();
+        fields["batch"].Text = defaultsProfile.Batch.ToString(); fields["ubatch"].Text = defaultsProfile.UBatch.ToString(); fields["parallel"].Text = defaultsProfile.Parallel.ToString(); fields["threads"].Text = defaultsProfile.Threads.ToString(); fields["checkpoints"].Text = defaultsProfile.CtxCheckpoints.ToString(); fields["timeout"].Text = defaultsProfile.Timeout.ToString();
         fields["reasoning"].Text = defaultsProfile.Reasoning; fields["budget"].Text = defaultsProfile.ReasoningBudget.ToString(); fields["mtp"].Text = "off"; fields["mtpTokens"].Text = "0";
         fields["effort"].Text = defaultsProfile.ReasoningEffort;
         jinja.Value = defaultsProfile.Jinja ? CheckState.Checked : CheckState.UnChecked; metrics.Value = defaultsProfile.Metrics ? CheckState.Checked : CheckState.UnChecked; mmap.Value = defaultsProfile.NoMmap ? CheckState.Checked : CheckState.UnChecked;
@@ -1143,7 +1143,7 @@ static bool EditProfile(IApplication app, Profile profile, string title)
     {
         try
         {
-            profile.Name = name.Text.Trim(); profile.Description = T("description").Trim(); profile.Model = AppConfig.Expand(T("model")); profile.LlamaServer = AppConfig.Expand(T("server")); profile.Alias = T("alias").Trim(); profile.Host = T("host").Trim(); profile.Port = ParseInt(T("port"), "Port");
+            profile.Name = name.Text.Trim(); profile.Description = T("description").Trim(); profile.Model = AppConfig.Expand(T("model")); profile.LlamaServer = AppConfig.Expand(T("server")); profile.Alias = T("alias").Trim(); profile.Host = T("host").Trim(); profile.Port = ParseInt(T("port"), "Port"); profile.Timeout = ParseInt(T("timeout"), "Server timeout");
             profile.Ctx = ParseInt(T("ctx"), "Context"); profile.Ngl = ParseInt(T("ngl"), "GPU layers"); profile.ChatTemplate = T("template").Trim(); profile.Reasoning = T("reasoning").Trim().ToLowerInvariant(); profile.ReasoningBudget = ParseInt(T("budget"), "Reasoning budget");
             profile.ReasoningEffort = T("effort").Trim().ToLowerInvariant();
             profile.Temp = ParseDouble(T("temp"), "Temperature"); profile.TopP = ParseDouble(T("topP"), "Top P"); profile.TopK = ParseInt(T("topK"), "Top K"); profile.MinP = ParseDouble(T("minP"), "Min P"); profile.RepeatPenalty = ParseDouble(T("repeatPenalty"), "Repeat penalty"); profile.RepeatLastN = ParseInt(T("repeatLastN"), "Repeat last N"); profile.PresencePenalty = ParseDouble(T("presence"), "Presence penalty"); profile.FrequencyPenalty = ParseDouble(T("frequency"), "Frequency penalty");

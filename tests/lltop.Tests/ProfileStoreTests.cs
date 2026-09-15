@@ -14,7 +14,7 @@ public sealed class ProfileStoreTests : IDisposable
             TopP = .83, MinP = .02, UBatch = 128, FlashAttn = "on", NoMmap = false,
             Vision = true, Mmproj = "/models/mmproj-BF16.gguf",
             RepeatPenalty = 1.15, RepeatLastN = 128, PresencePenalty = .2, FrequencyPenalty = .3,
-            ReasoningBudget = 2048, Mtp = true, MtpDraftTokens = 3, ImageMinTokens = 1024, ExtraArgs = ["--verbose", "--log-colors", "value with spaces"],
+            ReasoningBudget = 2048, Timeout = 7200, Mtp = true, MtpDraftTokens = 3, ImageMinTokens = 1024, ExtraArgs = ["--verbose", "--log-colors", "value with spaces"],
             Tags = ["fast", "coding model"], Favorite = true
         };
 
@@ -40,6 +40,7 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.True(loaded.Mtp);
         Assert.Equal(3, loaded.MtpDraftTokens);
         Assert.Equal(1024, loaded.ImageMinTokens);
+        Assert.Equal(7200, loaded.Timeout);
         Assert.Equal(original.ExtraArgs, loaded.ExtraArgs);
         Assert.Equal(["fast", "coding model"], loaded.Tags);
         Assert.True(loaded.Favorite);
@@ -124,6 +125,17 @@ public sealed class ProfileStoreTests : IDisposable
 
         Assert.Empty(result.Errors);
         Assert.Equal(["a", "b c"], Assert.Single(result.Profiles).Tags);
+    }
+
+    [Fact]
+    public void ExistingProfileWithoutTimeout_UsesTheOneHourDefault()
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "existing.toml"), "name = \"existing\"\n");
+
+        var profile = Assert.Single(new ProfileStore(directory).LoadAll().Profiles);
+
+        Assert.Equal(3600, profile.Timeout);
     }
 
     [Fact]
