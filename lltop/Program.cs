@@ -35,7 +35,7 @@ var load = store.LoadAll();
 var profiles = load.Profiles;
 var selected = Math.Max(0, profiles.FindIndex(p => p.Name.Equals(cfg.DefaultProfile, StringComparison.OrdinalIgnoreCase)));
 var selectedProfileListItem = 0;
-var runner = new ServerRunner();
+using var runner = new ServerRunner();
 var capabilityCache = new ServerCapabilityCache(Path.Combine(Path.GetDirectoryName(AppConfig.ConfigPath) ?? cfg.LogsDir, "server-capabilities.json"));
 var runningProfile = "";
 Profile? activeProfile = null;
@@ -59,6 +59,7 @@ CancellationTokenSource? benchmarkCancellation = null;
 BenchmarkRecord? activeBenchmark = null;
 var resourceGpuBackend = "";
 var resourceGpuName = "";
+var refreshingProfileItems = false;
 using var monitorCancellation = new CancellationTokenSource();
 _ = capabilityCache.Get(cfg.LlamaServer);
 
@@ -130,38 +131,48 @@ ApplyLayout();
 
 void RefreshProfileItems(string? selectName = null)
 {
-    profileItems.Clear();
-    if (profiles.Count == 0) profileItems.Add("  No profiles yet — press n to create one");
-    else
+    // ListView raises collection and viewport notifications synchronously while its
+    // source and selected item are being updated. A viewport handler can therefore
+    // call back into this method before the current refresh has finished. Ignore that
+    // nested notification; the outer refresh already has the latest profile state.
+    if (refreshingProfileItems) return;
+    refreshingProfileItems = true;
+    try
     {
-        var rows = new List<UiText.ProfileRowData>(profiles.Count);
-        foreach (var p in profiles)
+        profileItems.Clear();
+        if (profiles.Count == 0) profileItems.Add("  No profiles yet — press n to create one");
+        else
         {
-            var summary = SummaryFor(p.Name);
-            // Error state deliberately wins: a profile with a known launch failure must
-            // remain visible as broken even if it is selected or a new launch is pending.
-            var marker = UiText.ProfileGlyph(
-                isBroken: !File.Exists(AppConfig.Expand(p.Model)) || summary?.LastExitCode is not null and not 0,
-                isRunning: p.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase) && runner.State == RunnerState.Running);
-            rows.Add(new UiText.ProfileRowData(marker, p.Vision, p.Name, p.Tags, CompactModelSize(p.Model)));
+            var rows = new List<UiText.ProfileRowData>(profiles.Count);
+            foreach (var p in profiles)
+            {
+                var summary = SummaryFor(p.Name);
+                // Error state deliberately wins: a profile with a known launch failure must
+                // remain visible as broken even if it is selected or a new launch is pending.
+                var marker = UiText.ProfileGlyph(
+                    isBroken: !File.Exists(AppConfig.Expand(p.Model)) || summary?.LastExitCode is not null and not 0,
+                    isRunning: p.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase) && runner.State == RunnerState.Running);
+                rows.Add(new UiText.ProfileRowData(marker, p.Vision, p.Name, p.Tags, CompactModelSize(p.Model)));
+            }
+            var width = Math.Max(12, profileFrame.Viewport.Width > 0 ? profileFrame.Viewport.Width - 3 : 32);
+            var favoriteCount = profiles.Count(p => p.Favorite);
+            foreach (var (line, index) in UiText.ProfileRows(rows, width).Select((line, index) => (line, index)))
+            {
+                if (index == favoriteCount && favoriteCount > 0) profileItems.Add(new string('─', width));
+                profileItems.Add(line);
+            }
         }
-        var width = Math.Max(12, profileFrame.Viewport.Width > 0 ? profileFrame.Viewport.Width - 3 : 32);
-        var favoriteCount = profiles.Count(p => p.Favorite);
-        foreach (var (line, index) in UiText.ProfileRows(rows, width).Select((line, index) => (line, index)))
+        profileList.SetSource(profileItems);
+        if (profiles.Count == 0) { selected = 0; profileList.SelectedItem = 0; }
+        else
         {
-            if (index == favoriteCount && favoriteCount > 0) profileItems.Add(new string('─', width));
-            profileItems.Add(line);
+            var match = selectName is null ? -1 : profiles.FindIndex(p => p.Name.Equals(selectName, StringComparison.OrdinalIgnoreCase));
+            selected = Math.Clamp(match >= 0 ? match : selected, 0, profiles.Count - 1);
+            selectedProfileListItem = UiText.ProfileListItem(selected, profiles.Count, profiles.Count(p => p.Favorite));
+            profileList.SelectedItem = selectedProfileListItem;
         }
     }
-    profileList.SetSource(profileItems);
-    if (profiles.Count == 0) { selected = 0; profileList.SelectedItem = 0; }
-    else
-    {
-        var match = selectName is null ? -1 : profiles.FindIndex(p => p.Name.Equals(selectName, StringComparison.OrdinalIgnoreCase));
-        selected = Math.Clamp(match >= 0 ? match : selected, 0, profiles.Count - 1);
-        selectedProfileListItem = UiText.ProfileListItem(selected, profiles.Count, profiles.Count(p => p.Favorite));
-        profileList.SelectedItem = selectedProfileListItem;
-    }
+    finally { refreshingProfileItems = false; }
 }
 
 Profile? SelectedProfile() => profiles.Count == 0 ? null : profiles[Math.Clamp(selected, 0, profiles.Count - 1)];
@@ -959,7 +970,6 @@ _ = Task.Run(async () =>
 _ = Task.Run(async () => { await Task.Delay(50); app.Invoke(() => RefreshProfileItems(runningProfile)); });
 app.Run(win);
 monitorCancellation.Cancel();
-runner.Dispose();
 
 static bool EditProfile(IApplication app, Profile profile, string title)
 {
