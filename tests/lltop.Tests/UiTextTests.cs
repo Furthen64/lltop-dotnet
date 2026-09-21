@@ -113,4 +113,36 @@ public sealed class UiTextTests
         Assert.Equal("Input   reading 32 %  ·  2,560 tokens  ·  256.1 tok/s\nOutput  waiting for generation…", UiText.RequestMetrics(stats));
     }
 
+    [Fact]
+    public void ActivePromptReading_UsesTheTrailingTokenDeltaForRateAndEta()
+    {
+        var stats = new ServerStats();
+        var started = new DateTimeOffset(2026, 9, 20, 12, 0, 0, TimeSpan.Zero);
+        stats.Consume("prompt processing, n_tokens = 1000, progress = 0.10, t = 10.00 s / 100.0 tokens per second", observedAt: started);
+        stats.Consume("prompt processing, n_tokens = 7000, progress = 0.70, t = 70.00 s / 100.0 tokens per second", observedAt: started.AddMinutes(1));
+
+        var reading = Assert.IsType<PromptReadingProgress>(stats.ActivePromptReading);
+
+        Assert.Equal(100, reading.TokensPerSecond);
+        Assert.Equal(10_000, reading.EstimatedTotalTokens);
+        Assert.Equal(TimeSpan.FromSeconds(30), reading.EstimatedRemaining);
+        Assert.Equal(TimeSpan.FromMinutes(1), reading.SampleDuration);
+        Assert.True(reading.UsesRollingWindow);
+    }
+
+    [Fact]
+    public void ActivePromptReading_DropsSamplesOlderThanFiveMinutes()
+    {
+        var stats = new ServerStats();
+        var started = new DateTimeOffset(2026, 9, 20, 12, 0, 0, TimeSpan.Zero);
+        stats.Consume("prompt processing, n_tokens = 100, progress = 0.01", observedAt: started);
+        stats.Consume("prompt processing, n_tokens = 500, progress = 0.05", observedAt: started.AddMinutes(6));
+        stats.Consume("prompt processing, n_tokens = 1500, progress = 0.15", observedAt: started.AddMinutes(7));
+
+        var reading = Assert.IsType<PromptReadingProgress>(stats.ActivePromptReading);
+
+        Assert.Equal(TimeSpan.FromMinutes(1), reading.SampleDuration);
+        Assert.Equal(1_000d / 60d, reading.TokensPerSecond, 6);
+    }
+
 }

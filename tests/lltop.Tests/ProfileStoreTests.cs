@@ -14,7 +14,7 @@ public sealed class ProfileStoreTests : IDisposable
             TopP = .83, MinP = .02, UBatch = 128, FlashAttn = "on", NoMmap = false,
             Vision = true, Mmproj = "/models/mmproj-BF16.gguf",
             RepeatPenalty = 1.15, RepeatLastN = 128, PresencePenalty = .2, FrequencyPenalty = .3,
-            ReasoningBudget = 2048, Timeout = 7200, Mtp = true, MtpDraftTokens = 3, ImageMinTokens = 1024, ExtraArgs = ["--verbose", "--log-colors", "value with spaces"],
+            ReasoningBudget = 2048, Timeout = 7200, Verbosity = 2, Mtp = true, MtpDraftTokens = 3, ImageMinTokens = 1024, ExtraArgs = ["--verbose", "--log-colors", "value with spaces"],
             Tags = ["fast", "coding model"], Favorite = true
         };
 
@@ -41,6 +41,7 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.Equal(3, loaded.MtpDraftTokens);
         Assert.Equal(1024, loaded.ImageMinTokens);
         Assert.Equal(7200, loaded.Timeout);
+        Assert.Equal(2, loaded.Verbosity);
         Assert.Equal(original.ExtraArgs, loaded.ExtraArgs);
         Assert.Equal(["fast", "coding model"], loaded.Tags);
         Assert.True(loaded.Favorite);
@@ -93,6 +94,7 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.Equal(256, profile.UBatch);
         Assert.False(profile.Mtp);
         Assert.Equal(0, profile.MtpDraftTokens);
+        Assert.Equal(4, profile.Verbosity);
         Assert.Equal("/models/coding.gguf", profile.Model);
         Assert.Equal("/bin/llama-server", profile.LlamaServer);
         Assert.Equal("127.0.0.1", profile.Host);
@@ -128,6 +130,23 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveAndLoad_PreservesCommaInsideQuotedArrayValues()
+    {
+        var store = new ProfileStore(directory);
+        var original = new Profile
+        {
+            Name = "json args",
+            Model = "/tmp/model.gguf",
+            ExtraArgs = ["--chat-template-kwargs", "{\"reasoning_effort\":\"high\",\"tool_choice\":\"auto\"}"]
+        };
+
+        store.Save(original);
+        var loaded = Assert.Single(store.LoadAll().Profiles);
+
+        Assert.Equal(original.ExtraArgs, loaded.ExtraArgs);
+    }
+
+    [Fact]
     public void ExistingProfileWithoutTimeout_UsesTheOneHourDefault()
     {
         Directory.CreateDirectory(directory);
@@ -136,6 +155,7 @@ public sealed class ProfileStoreTests : IDisposable
         var profile = Assert.Single(new ProfileStore(directory).LoadAll().Profiles);
 
         Assert.Equal(3600, profile.Timeout);
+        Assert.Equal(4, profile.Verbosity);
     }
 
     [Fact]

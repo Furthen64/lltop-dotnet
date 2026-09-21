@@ -115,7 +115,9 @@ internal static partial class LlamaLogParser
 
 internal sealed class ServerStats
 {
+    private const int ReadingRateWindowMinutes = 5;
     readonly List<double> initialGenerationSamples = [];
+    readonly List<PromptProgressSample> promptProgressSamples = [];
     public double PromptTokensPerSecond { get; private set; }
     public double EvalTokensPerSecond { get; private set; }
     public double GenerationTokensPerSecond3s { get; private set; }
@@ -126,6 +128,34 @@ internal sealed class ServerStats
     public int PromptProgressTokens { get; private set; }
     public double Progress { get; private set; }
     public double PromptProgressTokensPerSecond { get; private set; }
+    public PromptReadingProgress? ActivePromptReading
+    {
+        get
+        {
+            if (Progress is not (> 0 and < 1) || PromptProgressTokens <= 0) return null;
+
+            var latest = promptProgressSamples.LastOrDefault();
+            var first = promptProgressSamples.FirstOrDefault();
+            var sampleDuration = latest.Timestamp - first.Timestamp;
+            var sampledTokens = latest.Tokens - first.Tokens;
+            var sampledRate = sampleDuration > TimeSpan.Zero && sampledTokens > 0
+                ? sampledTokens / sampleDuration.TotalSeconds
+                : 0;
+            var rate = sampledRate > 0 ? sampledRate : PromptProgressTokensPerSecond;
+            var estimatedTotalTokens = (int)Math.Ceiling(PromptProgressTokens / Progress);
+            var remainingTokens = Math.Max(0, estimatedTotalTokens - PromptProgressTokens);
+            TimeSpan? remaining = rate > 0 ? TimeSpan.FromSeconds(remainingTokens / rate) : null;
+
+            return new PromptReadingProgress(
+                Progress,
+                PromptProgressTokens,
+                estimatedTotalTokens,
+                rate,
+                remaining,
+                sampleDuration,
+                sampledRate > 0);
+        }
+    }
     public double InitialGenerationTokensPerSecond => initialGenerationSamples.Count == 0 ? 0 : initialGenerationSamples.Average();
     public string ChatFormat { get; private set; } = "";
     public int ContextSlotSize { get; private set; }
@@ -140,7 +170,7 @@ internal sealed class ServerStats
     public string LastHint { get; private set; } = "";
     public List<RunIssue> Issues { get; } = [];
 
-    public void Consume(string line, DateTimeOffset? startedAt = null)
+    public void Consume(string line, DateTimeOffset? startedAt = null, DateTimeOffset? observedAt = null)
     {
         var p = LlamaLogParser.Parse(line);
         if (p.IsRootRequestStart) ResetRequestMetrics();
@@ -159,6 +189,7 @@ internal sealed class ServerStats
             Progress = p.Progress;
             PromptProgressTokens = p.PromptProgressTokens;
             PromptProgressTokensPerSecond = p.PromptProgressTokensPerSecond;
+            RecordPromptProgress(observedAt ?? DateTimeOffset.Now, p.PromptProgressTokens);
         }
         if (p.ChatFormat.Length > 0) ChatFormat = p.ChatFormat;
         if (p.ContextSlotSize > 0) ContextSlotSize = p.ContextSlotSize;
@@ -182,6 +213,27 @@ internal sealed class ServerStats
         PromptProgressTokens = 0;
         Progress = 0;
         PromptProgressTokensPerSecond = 0;
+        promptProgressSamples.Clear();
         initialGenerationSamples.Clear();
     }
+
+    void RecordPromptProgress(DateTimeOffset observedAt, int tokens)
+    {
+        if (tokens <= 0) return;
+        if (promptProgressSamples.LastOrDefault() is { } last && last.Tokens == tokens) return;
+        promptProgressSamples.Add(new PromptProgressSample(observedAt, tokens));
+        var cutoff = observedAt - TimeSpan.FromMinutes(ReadingRateWindowMinutes);
+        promptProgressSamples.RemoveAll(sample => sample.Timestamp < cutoff);
+    }
+
+    readonly record struct PromptProgressSample(DateTimeOffset Timestamp, int Tokens);
 }
+
+internal sealed record PromptReadingProgress(
+    double Fraction,
+    int ReadTokens,
+    int EstimatedTotalTokens,
+    double TokensPerSecond,
+    TimeSpan? EstimatedRemaining,
+    TimeSpan SampleDuration,
+    bool UsesRollingWindow);

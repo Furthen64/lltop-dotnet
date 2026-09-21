@@ -61,7 +61,7 @@ var resourceGpuBackend = "";
 var resourceGpuName = "";
 var refreshingProfileItems = false;
 using var monitorCancellation = new CancellationTokenSource();
-_ = capabilityCache.Get(cfg.LlamaServer);
+_ = capabilityCache.RefreshAsync(cfg.LlamaServer);
 
 var win = new Window { Title = " lltop · llama.cpp control center ", X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
 var banner = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Text = "LLAMA SERVER  •  profiles, launches, and live output" };
@@ -76,7 +76,8 @@ var status = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(),
 statusFrame.Add(status);
 var metricsFrame = new FrameView { Title = " Metrics ", X = Pos.Right(statusFrame), Y = Pos.Bottom(logFrame), Width = Dim.Fill(), Height = 10 };
 var metrics = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(), Text = "Waiting for the first request…" };
-metricsFrame.Add(metrics);
+var readingProgress = new RequestMetricsView { X = 1, Y = 0, Width = Dim.Fill(2) };
+metricsFrame.Add(readingProgress, metrics);
 var help = new Label { X = 1, Y = Pos.Bottom(statusFrame), Width = Dim.Fill(2), Height = 3,
     Text = "[Enter] Start   [e/F2] Edit   [d] Duplicate   [x] Delete   [n] New   [Ctrl+F] Favorite\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [h/?] All keys   [q] Quit" };
 var resourceStrip = new ResourceStripView { X = 1, Y = Pos.Bottom(help), Width = Dim.Fill(2) };
@@ -191,7 +192,7 @@ ProfileRunSummary? SummaryFor(string profileName)
 void UpdateStatus(string message = "")
 {
     var p = SelectedProfile();
-    var state = runner.IsActive ? runner.State.ToString().ToUpperInvariant() : externalServer is null ? runner.State.ToString().ToUpperInvariant() : "EXTERNAL";
+    var state = runner.IsActive ? runner.State.ToString().ToUpperInvariant() : externalServer is null ? runner.State.ToString().ToUpperInvariant() : $"EXTERNAL {externalServer.State.ToString().ToUpperInvariant()}";
     var pidValue = runner.ProcessId ?? externalServer?.Pid;
     var pid = pidValue is int id ? $"  PID {id}" : "";
     var uptime = runner.StartedAt is { } started && runner.IsActive ? $"  Uptime {(DateTimeOffset.Now - started):hh\\:mm\\:ss}" : "";
@@ -203,8 +204,12 @@ void UpdateStatus(string message = "")
         metrics.Text = "Request stats  Waiting for a server launch…";
         return;
     }
-    var model = string.IsNullOrWhiteSpace(p.Model) ? "not configured" : Path.GetFileName(p.Model);
-    var modelSize = ModelSize(p.Model);
+    var attachedExternal = !runner.IsActive && externalServer is not null;
+    var attachedModel = externalServer?.Model ?? "";
+    var model = attachedExternal
+        ? string.IsNullOrWhiteSpace(attachedModel) ? "not reported by command" : Path.GetFileName(attachedModel)
+        : string.IsNullOrWhiteSpace(p.Model) ? "not configured" : Path.GetFileName(p.Model);
+    var modelSize = attachedExternal ? ModelSize(attachedModel) : ModelSize(p.Model);
     var gpu = GpuLaunchInfo.ForProfile(p);
     var capability = CapabilitiesFor(p);
     var runtimeBackend = runner.IsActive ? serverStats.RuntimeBackend : "";
@@ -219,8 +224,10 @@ void UpdateStatus(string message = "")
     var summary = SummaryFor(p.Name);
     var device = gpu.IsExplicit ? gpu.Summary : "Automatic";
     var runtimeName = Path.GetFileName(capability.BinaryPath);
-    var server = $"{runtimeName}  ·  {backend} backend  ·  llama.cpp {capability.BuildSummary}";
-    if (!string.IsNullOrWhiteSpace(gpuName)) server += $"  ·  {gpuName}";
+    var server = attachedExternal
+        ? $"attached {externalServer!.Host}:{externalServer.Port}  ·  {externalServer.State}  ·  {externalServer.StateDetail}"
+        : $"{runtimeName}  ·  {backend} backend  ·  llama.cpp {capability.BuildSummary}";
+    if (!attachedExternal && !string.IsNullOrWhiteSpace(gpuName)) server += $"  ·  {gpuName}";
     var vision = p.Vision ? $"On  ·  {Path.GetFileName(p.Mmproj)}" : "Off";
     var lastRun = summary?.LastRunAt is { } last
         ? $"{(summary.LastExitCode == 0 ? "Success" : $"Failed (exit {summary.LastExitCode})")}  ·  {UiText.RelativeTime(last, DateTimeOffset.Now)}" +
@@ -244,9 +251,14 @@ void UpdateStatus(string message = "")
         : "";
     lines.Add(notice);
     status.Text = string.Join('\n', lines);
-    metrics.Text = runner.IsActive || externalServer is not null
-        ? UiText.RequestMetrics(serverStats)
-        : "Request stats  Waiting for a server launch…";
+    var activeReading = serverStats.ActivePromptReading;
+    readingProgress.Progress = activeReading;
+    metrics.Y = activeReading is null ? 0 : Pos.Bottom(readingProgress);
+    metrics.Text = activeReading is null
+        ? runner.IsActive || externalServer is not null
+            ? UiText.RequestMetrics(serverStats)
+            : "Request stats  Waiting for a server launch…"
+        : "";
 }
 
 void RefreshLogs()
@@ -328,7 +340,7 @@ void UpdateLogStatus()
     var source = runner.IsActive
         ? $"llama-server stdio → {runner.LogPath}"
         : externalServer is not null
-            ? string.IsNullOrWhiteSpace(externalServer.LogPath) ? "external llama-server (no readable log file)" : $"external log file → {externalServer.LogPath}"
+            ? string.IsNullOrWhiteSpace(externalServer.LogPath) ? $"external llama-server · {externalServer.State}" : $"external log file → {externalServer.LogPath} · {externalServer.State}"
             : "no live log source";
     var mode = logAutoScroll
         ? "FOLLOWING"
@@ -450,7 +462,7 @@ void RefreshModels()
 {
     try
     {
-        var result = FirstRunProfiles.ScanAndGenerate(cfg, capabilityCache.Get(cfg.LlamaServer));
+        var result = FirstRunProfiles.ScanAndGenerate(cfg, capabilityCache.GetCachedOrFallback(cfg.LlamaServer));
         if (result.ModelsFound == 0)
         {
             ReloadProfiles(message: $"No compatible models found in {cfg.ModelsDir}.");
@@ -491,7 +503,7 @@ async Task Launch(bool restart = false)
         }
         while (!restart && !RunHistory.HasRunForProfile(cfg.RunsDir, profile.Name))
         {
-            var firstLaunch = ShowFirstLaunchAdvisor(app, cfg, profile, CapabilitiesFor(profile), capabilityCache.Get(cfg.LlamaServer));
+            var firstLaunch = ShowFirstLaunchAdvisor(app, cfg, profile, CapabilitiesFor(profile), capabilityCache.GetCachedOrFallback(cfg.LlamaServer));
             if (firstLaunch == FirstLaunchAction.Cancel) return;
             if (firstLaunch == FirstLaunchAction.Edit)
             {
@@ -526,7 +538,9 @@ async Task Launch(bool restart = false)
                 ShowStartupFailureAnalysis(app, cfg, profile, recent);
             }
         }
-        var capability = CapabilitiesFor(profile);
+        var executable = string.IsNullOrWhiteSpace(profile.LlamaServer) ? cfg.LlamaServer : profile.LlamaServer;
+        UpdateStatus("Checking llama-server capabilities…");
+        var capability = await capabilityCache.GetAsync(executable);
         var plan = LaunchPlanFor(profile, capability);
         if (plan.HasManualRemovals)
         {
@@ -914,12 +928,18 @@ _ = Task.Run(async () =>
     {
         try
         {
-            var update = externalMonitor.Poll();
+            var update = await externalMonitor.PollAsync(monitorCancellation.Token);
             app.Invoke(() =>
             {
                 ResumeLogFollowWhenIdle();
                 if (runner.IsActive || benchmarkActive) return;
                 var changed = externalServer?.Pid != update.Server?.Pid;
+                var attachmentChanged = externalServer?.State != update.Server?.State || externalServer?.StateDetail != update.Server?.StateDetail;
+                if (changed)
+                {
+                    serverStats = new ServerStats();
+                    logLines.Clear();
+                }
                 externalServer = update.Server;
                 foreach (var line in update.Lines)
                 {
@@ -927,7 +947,7 @@ _ = Task.Run(async () =>
                     logLines.Add(line);
                     if (logLines.Count > 500) logLines.RemoveAt(0);
                 }
-                if (changed || update.Lines.Count > 0) { RefreshLogs(); UpdateStatus(externalServer is null ? "No external server detected." : $"Following external server log: {externalServer.LogPath}"); }
+                if (changed || attachmentChanged || update.Lines.Count > 0) { RefreshLogs(); UpdateStatus(externalServer is null ? "No external server detected." : $"External server {externalServer.State}: {externalServer.StateDetail}"); }
             });
             await Task.Delay(1000, monitorCancellation.Token);
         }
@@ -1114,7 +1134,7 @@ static bool EditProfile(IApplication app, Profile profile, string title)
     flash.Add(new Label { X = 2, Y = 8, Text = "q8_0 / q8_0: recommended quality baseline; uses about half the KV memory of f16 / f16." });
     flash.Add(new Label { X = 2, Y = 9, Text = "q4_0 / q4_0: about half q8 KV memory; use it to fit more context, then check quality." });
     Field(flash, "batch", "Batch", profile.Batch.ToString(), 2, 12, 8); Field(flash, "ubatch", "Micro batch", profile.UBatch.ToString(), 24, 12, 8); Field(flash, "parallel", "Parallel slots", profile.Parallel.ToString(), 49, 12, 6); Field(flash, "threads", "CPU threads", profile.Threads.ToString(), 72, 12, 6);
-    Field(flash, "checkpoints", "Context checkpoints", profile.CtxCheckpoints.ToString(), 2, 15, 6); Field(flash, "timeout", "Server timeout (s)", profile.Timeout.ToString(), 33, 15, 7);
+    Field(flash, "checkpoints", "Context checkpoints", profile.CtxCheckpoints.ToString(), 2, 15, 6); Field(flash, "timeout", "Server timeout (s)", profile.Timeout.ToString(), 33, 15, 7); Field(flash, "verbosity", "Verbosity", profile.Verbosity.ToString(), 55, 15, 4);
     flash.Add(new Label { X = 2, Y = 18, Text = "The one-hour server timeout allows slow prefill before the first response token. Blank cache or flash values omit those matching options." });
 
     mtpPage.Add(new Label { X = 2, Y = 1, Text = "Multi-token prediction / draft-MTP" });
@@ -1143,7 +1163,7 @@ static bool EditProfile(IApplication app, Profile profile, string title)
         fields["temp"].Text = defaultsProfile.Temp.ToString(CultureInfo.InvariantCulture); fields["topP"].Text = defaultsProfile.TopP.ToString(CultureInfo.InvariantCulture); fields["topK"].Text = defaultsProfile.TopK.ToString(); fields["minP"].Text = defaultsProfile.MinP.ToString(CultureInfo.InvariantCulture);
         fields["repeatPenalty"].Text = defaultsProfile.RepeatPenalty.ToString(CultureInfo.InvariantCulture); fields["repeatLastN"].Text = defaultsProfile.RepeatLastN.ToString(); fields["presence"].Text = defaultsProfile.PresencePenalty.ToString(CultureInfo.InvariantCulture); fields["frequency"].Text = defaultsProfile.FrequencyPenalty.ToString(CultureInfo.InvariantCulture);
         fields["flash"].Text = defaultsProfile.FlashAttn; fields["cacheK"].Text = defaultsProfile.CacheK; fields["cacheV"].Text = defaultsProfile.CacheV;
-        fields["batch"].Text = defaultsProfile.Batch.ToString(); fields["ubatch"].Text = defaultsProfile.UBatch.ToString(); fields["parallel"].Text = defaultsProfile.Parallel.ToString(); fields["threads"].Text = defaultsProfile.Threads.ToString(); fields["checkpoints"].Text = defaultsProfile.CtxCheckpoints.ToString(); fields["timeout"].Text = defaultsProfile.Timeout.ToString();
+        fields["batch"].Text = defaultsProfile.Batch.ToString(); fields["ubatch"].Text = defaultsProfile.UBatch.ToString(); fields["parallel"].Text = defaultsProfile.Parallel.ToString(); fields["threads"].Text = defaultsProfile.Threads.ToString(); fields["checkpoints"].Text = defaultsProfile.CtxCheckpoints.ToString(); fields["timeout"].Text = defaultsProfile.Timeout.ToString(); fields["verbosity"].Text = defaultsProfile.Verbosity.ToString();
         fields["reasoning"].Text = defaultsProfile.Reasoning; fields["budget"].Text = defaultsProfile.ReasoningBudget.ToString(); fields["mtp"].Text = "off"; fields["mtpTokens"].Text = "0";
         fields["effort"].Text = defaultsProfile.ReasoningEffort;
         jinja.Value = defaultsProfile.Jinja ? CheckState.Checked : CheckState.UnChecked; metrics.Value = defaultsProfile.Metrics ? CheckState.Checked : CheckState.UnChecked; mmap.Value = defaultsProfile.NoMmap ? CheckState.Checked : CheckState.UnChecked;
@@ -1153,7 +1173,7 @@ static bool EditProfile(IApplication app, Profile profile, string title)
     {
         try
         {
-            profile.Name = name.Text.Trim(); profile.Description = T("description").Trim(); profile.Model = AppConfig.Expand(T("model")); profile.LlamaServer = AppConfig.Expand(T("server")); profile.Alias = T("alias").Trim(); profile.Host = T("host").Trim(); profile.Port = ParseInt(T("port"), "Port"); profile.Timeout = ParseInt(T("timeout"), "Server timeout");
+            profile.Name = name.Text.Trim(); profile.Description = T("description").Trim(); profile.Model = AppConfig.Expand(T("model")); profile.LlamaServer = AppConfig.Expand(T("server")); profile.Alias = T("alias").Trim(); profile.Host = T("host").Trim(); profile.Port = ParseInt(T("port"), "Port"); profile.Timeout = ParseInt(T("timeout"), "Server timeout"); profile.Verbosity = ParseInt(T("verbosity"), "Verbosity");
             profile.Ctx = ParseInt(T("ctx"), "Context"); profile.Ngl = ParseInt(T("ngl"), "GPU layers"); profile.ChatTemplate = T("template").Trim(); profile.Reasoning = T("reasoning").Trim().ToLowerInvariant(); profile.ReasoningBudget = ParseInt(T("budget"), "Reasoning budget");
             profile.ReasoningEffort = T("effort").Trim().ToLowerInvariant();
             profile.Temp = ParseDouble(T("temp"), "Temperature"); profile.TopP = ParseDouble(T("topP"), "Top P"); profile.TopK = ParseInt(T("topK"), "Top K"); profile.MinP = ParseDouble(T("minP"), "Min P"); profile.RepeatPenalty = ParseDouble(T("repeatPenalty"), "Repeat penalty"); profile.RepeatLastN = ParseInt(T("repeatLastN"), "Repeat last N"); profile.PresencePenalty = ParseDouble(T("presence"), "Presence penalty"); profile.FrequencyPenalty = ParseDouble(T("frequency"), "Frequency penalty");
@@ -1412,7 +1432,9 @@ static bool RunFirstRunWizard(IApplication app, AppConfig cfg)
             cfg.LlamaServer = serverPath;
             cfg.ModelsDir = modelsPath;
             cfg.Save();
-            FirstRunProfiles.ScanAndGenerate(cfg, new ServerCapabilityCache(Path.Combine(Path.GetDirectoryName(AppConfig.ConfigPath) ?? cfg.LogsDir, "server-capabilities.json")).Get(cfg.LlamaServer));
+            var setupCapabilityCache = new ServerCapabilityCache(Path.Combine(Path.GetDirectoryName(AppConfig.ConfigPath) ?? cfg.LogsDir, "server-capabilities.json"));
+            _ = setupCapabilityCache.RefreshAsync(cfg.LlamaServer);
+            FirstRunProfiles.ScanAndGenerate(cfg, setupCapabilityCache.GetCachedOrFallback(cfg.LlamaServer));
             completed = true;
             app.RequestStop();
         }
@@ -1552,7 +1574,7 @@ static void LaunchBenchmarkReport(string reportPath)
 ServerCapabilityRecord CapabilitiesFor(Profile profile)
 {
     var executable = string.IsNullOrWhiteSpace(profile.LlamaServer) ? cfg.LlamaServer : profile.LlamaServer;
-    return capabilityCache.Get(executable);
+    return capabilityCache.GetCachedOrFallback(executable);
 }
 
 LaunchPlan LaunchPlanFor(Profile profile, ServerCapabilityRecord capabilities)

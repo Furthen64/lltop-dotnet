@@ -90,6 +90,8 @@ interface IServerProbeExecutor
 
 sealed class ProcessServerProbeExecutor : IServerProbeExecutor
 {
+    static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+
     public ProbeCommandResult Run(string executable, string argument)
     {
         try
@@ -105,9 +107,17 @@ sealed class ProcessServerProbeExecutor : IServerProbeExecutor
             info.ArgumentList.Add(argument);
             using var process = new Process { StartInfo = info };
             if (!process.Start()) return ProbeCommandResult.Failure("llama-server did not start.");
-            var output = process.StandardOutput.ReadToEnd();
-            var error = process.StandardError.ReadToEnd();
-            process.WaitForExit();
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(Timeout))
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                Task.WaitAll([outputTask, errorTask], Timeout);
+                return ProbeCommandResult.Failure($"{argument} timed out after {Timeout.TotalSeconds:F0} seconds.");
+            }
+            Task.WaitAll(outputTask, errorTask);
+            var output = outputTask.GetAwaiter().GetResult();
+            var error = errorTask.GetAwaiter().GetResult();
             return process.ExitCode == 0
                 ? ProbeCommandResult.Success(JoinOutput(output, error), process.ExitCode)
                 : ProbeCommandResult.Failure(string.IsNullOrWhiteSpace(error) ? $"Exited with code {process.ExitCode}." : error.Trim(), process.ExitCode, output);
@@ -131,6 +141,8 @@ sealed class ServerCapabilityCache
     readonly string cachePath;
     readonly IServerProbeExecutor executor;
     readonly Dictionary<string, ServerCapabilityRecord> cache;
+    readonly Dictionary<string, Task<ServerCapabilityRecord>> pending = new(StringComparer.Ordinal);
+    readonly object gate = new();
     static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     public ServerCapabilityCache(string cachePath, IServerProbeExecutor? executor = null)
@@ -142,22 +154,72 @@ sealed class ServerCapabilityCache
 
     public ServerCapabilityRecord Get(string executable)
     {
+        if (!TryResolve(executable, out var path, out var info, out var unavailable)) return unavailable!;
+        lock (gate)
+            if (TryGetCurrent(path, info, out var existing)) return existing;
+        return Store(path, Probe(path, info));
+    }
+
+    // Use this from the UI's hot paths. It returns a deliberately conservative plan
+    // immediately and refreshes the cache off the UI thread.
+    public ServerCapabilityRecord GetCachedOrFallback(string executable)
+    {
+        if (!TryResolve(executable, out var path, out var info, out var unavailable)) return unavailable!;
+        lock (gate)
+        {
+            if (TryGetCurrent(path, info, out var existing)) return existing;
+            if (!pending.ContainsKey(path)) pending[path] = Task.Run(() => Store(path, Probe(path, info)));
+        }
+        return SafeFallback(path, "Capability probe is running; using the safe compatibility set until it completes.");
+    }
+
+    public async Task<ServerCapabilityRecord> GetAsync(string executable)
+    {
+        if (!TryResolve(executable, out var path, out var info, out var unavailable)) return unavailable!;
+        Task<ServerCapabilityRecord>? probe;
+        lock (gate)
+        {
+            if (TryGetCurrent(path, info, out var existing)) return existing;
+            if (!pending.TryGetValue(path, out probe)) pending[path] = probe = Task.Run(() => Store(path, Probe(path, info)));
+        }
+        return await probe;
+    }
+
+    public Task RefreshAsync(string executable) => GetAsync(executable);
+
+    bool TryResolve(string executable, out string path, out FileInfo info, out ServerCapabilityRecord? unavailable)
+    {
+        path = "";
+        info = null!;
+        unavailable = null;
         if (string.IsNullOrWhiteSpace(executable))
-            return new ServerCapabilityRecord { BinaryPath = executable, DetectionIncomplete = true, ProbeMessage = "llama-server path is not configured." };
-
-        var path = Path.GetFullPath(executable);
+        {
+            unavailable = new ServerCapabilityRecord { BinaryPath = executable, DetectionIncomplete = true, ProbeMessage = "llama-server path is not configured." };
+            return false;
+        }
+        path = Path.GetFullPath(executable);
         if (!File.Exists(path))
-            return new ServerCapabilityRecord { BinaryPath = path, DetectionIncomplete = true, ProbeMessage = "llama-server was not found." };
+        {
+            unavailable = new ServerCapabilityRecord { BinaryPath = path, DetectionIncomplete = true, ProbeMessage = "llama-server was not found." };
+            return false;
+        }
+        info = new FileInfo(path);
+        return true;
+    }
 
-        var info = new FileInfo(path);
-        if (cache.TryGetValue(path, out var existing) &&
-            existing.ProbeSchemaVersion == ServerCapabilityRecord.CurrentProbeSchemaVersion &&
-            existing.BinaryLastWriteTimeUtcTicks == info.LastWriteTimeUtc.Ticks &&
-            existing.BinaryLength == info.Length)
-            return existing;
+    bool TryGetCurrent(string path, FileInfo info, out ServerCapabilityRecord record) =>
+        cache.TryGetValue(path, out record!) &&
+        record.ProbeSchemaVersion == ServerCapabilityRecord.CurrentProbeSchemaVersion &&
+        record.BinaryLastWriteTimeUtcTicks == info.LastWriteTimeUtc.Ticks &&
+        record.BinaryLength == info.Length;
 
-        var record = Probe(path, info);
-        cache[path] = record;
+    ServerCapabilityRecord Store(string path, ServerCapabilityRecord record)
+    {
+        lock (gate)
+        {
+            cache[path] = record;
+            pending.Remove(path);
+        }
         Save();
         return record;
     }
@@ -181,9 +243,19 @@ sealed class ServerCapabilityCache
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(cachePath) ?? ".");
-            var temp = cachePath + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(cache.Values.OrderBy(x => x.BinaryPath, StringComparer.Ordinal).ToList(), JsonOptions));
-            File.Move(temp, cachePath, true);
+            var temp = cachePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            List<ServerCapabilityRecord> records;
+            lock (gate) records = cache.Values.OrderBy(x => x.BinaryPath, StringComparer.Ordinal).ToList();
+            try
+            {
+                File.WriteAllText(temp, JsonSerializer.Serialize(records, JsonOptions));
+                File.Move(temp, cachePath, true);
+            }
+            finally
+            {
+                try { if (File.Exists(temp)) File.Delete(temp); }
+                catch { }
+            }
         }
         catch { }
     }
@@ -194,6 +266,9 @@ sealed class ServerCapabilityCache
         var help = executor.Run(executable, "--help");
         return ServerCapabilityParser.Parse(executable, info, version, help);
     }
+
+    static ServerCapabilityRecord SafeFallback(string path, string message) =>
+        ServerCapabilityParser.Parse(path, new FileInfo(path), ProbeCommandResult.Failure(message), ProbeCommandResult.Failure(message));
 }
 
 static class ServerCapabilityParser
@@ -205,13 +280,13 @@ static class ServerCapabilityParser
 
     static readonly HashSet<string> SafeFallbackOptions =
     [
-        "-m", "--model", "--host", "--port", "-a", "-c", "-ngl", "--temp", "--top-p", "--top-k", "--min-p",
+        "-m", "--model", "--host", "--port", "-v", "-a", "-c", "-ngl", "--temp", "--top-p", "--top-k", "--min-p",
         "-b", "-ub", "--parallel", "--threads", "--timeout", "--metrics", "--no-mmap", "--chat-template"
     ];
 
     static readonly Dictionary<string, bool> KnownOptionArity = new(StringComparer.Ordinal)
     {
-        ["-m"] = true, ["--model"] = true, ["--host"] = true, ["--port"] = true, ["-a"] = true, ["-c"] = true,
+        ["-m"] = true, ["--model"] = true, ["--host"] = true, ["--port"] = true, ["-v"] = true, ["--verbosity"] = true, ["-a"] = true, ["-c"] = true,
         ["-ngl"] = true, ["--cache-type-k"] = true, ["--cache-type-v"] = true, ["--flash-attn"] = true, ["-fa"] = true,
         ["--temp"] = true, ["--top-p"] = true, ["--top-k"] = true, ["--min-p"] = true, ["-b"] = true, ["-ub"] = true,
         ["--parallel"] = true, ["--threads"] = true, ["--timeout"] = true, ["--chat-template"] = true, ["--reasoning"] = true,

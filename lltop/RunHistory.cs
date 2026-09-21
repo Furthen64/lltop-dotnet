@@ -83,14 +83,48 @@ internal static class RunHistory
     {
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, $"{record.StartedAt:yyyy-MM-dd_HHmmss}_{ProfileStore.Slugify(record.ProfileName)}.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(record, Json) + Environment.NewLine);
+        WriteAtomically(path, JsonSerializer.Serialize(record, Json) + Environment.NewLine);
         return path;
     }
 
-    public static List<RunRecordRef> Load(string directory) => !Directory.Exists(directory) ? [] : Directory.EnumerateFiles(directory, "*.json")
-        .OrderByDescending(x => x, StringComparer.Ordinal).Select(path => new RunRecordRef(path, JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(path), Json) ?? throw new InvalidDataException($"Invalid run record: {path}"))).ToList();
+    // A single interrupted write or manually edited report must not make every run
+    // invisible—or prevent a new server launch. Invalid files remain in place for
+    // recovery, while valid records continue to load.
+    public static List<RunRecordRef> Load(string directory)
+    {
+        if (!Directory.Exists(directory)) return [];
+        var records = new List<RunRecordRef>();
+        foreach (var path in Directory.EnumerateFiles(directory, "*.json").OrderByDescending(x => x, StringComparer.Ordinal))
+        {
+            try
+            {
+                var record = JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(path), Json);
+                if (record is not null) records.Add(new RunRecordRef(path, record));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                // Keep the artifact intact; callers can still use the remaining history.
+            }
+        }
+        return records;
+    }
 
-    public static void Update(string path, RunRecord record) => File.WriteAllText(path, JsonSerializer.Serialize(record, Json) + Environment.NewLine);
+    public static void Update(string path, RunRecord record) => WriteAtomically(path, JsonSerializer.Serialize(record, Json) + Environment.NewLine);
+
+    static void WriteAtomically(string path, string contents)
+    {
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, contents);
+            File.Move(temporary, path, true);
+        }
+        finally
+        {
+            try { if (File.Exists(temporary)) File.Delete(temporary); }
+            catch { }
+        }
+    }
 
     public static List<RunRecordRef> ForProfile(string directory, string profile) => Load(directory).Where(x => x.Record.ProfileName.Equals(profile, StringComparison.OrdinalIgnoreCase)).ToList();
 

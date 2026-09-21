@@ -17,6 +17,7 @@ sealed class Profile
     // Long prompt reprocessing can take several minutes before the first SSE token.
     // Keep the server deadline above typical client defaults for local workloads.
     public int Timeout { get; set; } = 3600;
+    public int Verbosity { get; set; } = 4;
     public string Alias { get; set; } = "";
     public int Ctx { get; set; } = 65536;
     public int Ngl { get; set; } = 99;
@@ -88,6 +89,7 @@ sealed class Profile
         ReasoningBudget = -1;
         ReasoningEffort = "";
         Timeout = 3600;
+        Verbosity = 4;
         Mtp = false;
         MtpDraftTokens = 0;
     }
@@ -96,7 +98,7 @@ sealed class Profile
     {
         Name = name, Description = Description, Favorite = Favorite, Tags = [.. Tags], LlamaServer = LlamaServer, Model = Model,
         Vision = Vision, Mmproj = Mmproj, ImageMinTokens = ImageMinTokens,
-        Host = Host, Port = Port, Timeout = Timeout, Alias = Alias, Ctx = Ctx, Ngl = Ngl,
+        Host = Host, Port = Port, Timeout = Timeout, Verbosity = Verbosity, Alias = Alias, Ctx = Ctx, Ngl = Ngl,
         CacheK = CacheK, CacheV = CacheV, Temp = Temp, TopP = TopP, TopK = TopK,
         MinP = MinP, RepeatPenalty = RepeatPenalty, RepeatLastN = RepeatLastN,
         PresencePenalty = PresencePenalty, FrequencyPenalty = FrequencyPenalty,
@@ -112,6 +114,7 @@ sealed class Profile
         if (string.IsNullOrWhiteSpace(Name)) throw new InvalidOperationException("Profile name is required.");
         if (Port is < 1 or > 65535) throw new InvalidOperationException("Port must be between 1 and 65535.");
         if (Timeout < 1) throw new InvalidOperationException("Server timeout must be at least one second.");
+        if (Verbosity < 0) throw new InvalidOperationException("Verbosity cannot be negative.");
         if (!new[] { "", "auto", "on", "off" }.Contains(FlashAttn, StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException("Flash attention must be auto, on, or off.");
         if (!new[] { "", "auto", "on", "off" }.Contains(Reasoning, StringComparer.OrdinalIgnoreCase))
@@ -227,7 +230,7 @@ sealed class ProfileStore(string directory)
         b.Append("tags = [").Append(string.Join(", ", p.Tags.Select(Toml.Quote))).AppendLine("]");
         if (!string.IsNullOrWhiteSpace(p.LlamaServer)) S("llama_server", p.LlamaServer);
         S("model", p.Model); B("vision", p.Vision); S("mmproj", p.Mmproj); I("image_min_tokens", p.ImageMinTokens);
-        S("host", p.Host); I("port", p.Port); I("timeout", p.Timeout); S("alias", p.Alias);
+        S("host", p.Host); I("port", p.Port); I("timeout", p.Timeout); I("verbosity", p.Verbosity); S("alias", p.Alias);
         I("ctx", p.Ctx); I("ngl", p.Ngl); S("cache_k", p.CacheK); S("cache_v", p.CacheV);
         D("temp", p.Temp); D("top_p", p.TopP); I("top_k", p.TopK); D("min_p", p.MinP);
         D("repeat_penalty", p.RepeatPenalty); I("repeat_last_n", p.RepeatLastN);
@@ -297,7 +300,31 @@ static class Toml
     {
         value = value.Trim();
         if (!value.StartsWith('[') || !value.EndsWith(']')) throw new FormatException("Expected an array.");
-        return value[1..^1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(Unquote).ToList();
+        var values = new List<string>();
+        var content = value[1..^1];
+        if (string.IsNullOrWhiteSpace(content)) return values;
+        var start = 0;
+        var quote = '\0';
+        var escaped = false;
+        for (var i = 0; i <= content.Length; i++)
+        {
+            if (i == content.Length || (content[i] == ',' && quote == '\0'))
+            {
+                var item = content[start..i].Trim();
+                if (item.Length == 0) throw new FormatException("Array contains an empty value.");
+                values.Add(Unquote(item));
+                start = i + 1;
+                continue;
+            }
+
+            var current = content[i];
+            if (escaped) { escaped = false; continue; }
+            if (current == '\\') { escaped = true; continue; }
+            if (quote == '\0' && current is '\'' or '"') quote = current;
+            else if (current == quote) quote = '\0';
+        }
+        if (quote != '\0') throw new FormatException("Array contains an unmatched quote.");
+        return values;
     }
     static string Unquote(string value)
     {

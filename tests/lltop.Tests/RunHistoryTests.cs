@@ -82,5 +82,17 @@ public sealed class RunHistoryTests : IDisposable
         Assert.Equal(graphDataPath, run.GraphDataPath);
     }
 
+    [Fact]
+    public void Load_SkipsOneMalformedRecordAndKeepsTheValidHistory()
+    {
+        var profile = new Profile { Name = "qwen", Model = "/m.gguf" };
+        RunHistory.Save(dir, RunRecord.Create(profile, "server", DateTimeOffset.Now.AddSeconds(-2), DateTimeOffset.Now, 0, "exit", new ServerStats()));
+        File.WriteAllText(Path.Combine(dir, "broken.json"), "{ definitely not json");
+
+        var runs = RunHistory.ForProfile(dir, profile.Name);
+
+        Assert.Single(runs);
+    }
+
     public void Dispose() { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
 }

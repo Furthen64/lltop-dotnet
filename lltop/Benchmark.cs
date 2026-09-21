@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http.Json;
 using System.Text;
@@ -330,8 +331,10 @@ internal sealed class BenchmarkRunner
     {
         item.Status = BenchmarkCaseStatus.Running; item.StartedAt = DateTimeOffset.Now;
         var runner = new ServerRunner();
-        var lines = new List<string>();
-        runner.LineReceived += line => lines.Add(line);
+        // ServerRunner reads stdout and stderr concurrently. Keep the evidence used
+        // for OOM classification safe to append and enumerate from either reader.
+        var lines = new ConcurrentQueue<string>();
+        runner.LineReceived += lines.Enqueue;
         try
         {
             await runner.StartAsync(createPlan(item.Profile), item.Profile, config);
