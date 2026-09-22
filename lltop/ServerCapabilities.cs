@@ -280,13 +280,13 @@ static class ServerCapabilityParser
 
     static readonly HashSet<string> SafeFallbackOptions =
     [
-        "-m", "--model", "--host", "--port", "-v", "-a", "-c", "-ngl", "--temp", "--top-p", "--top-k", "--min-p",
+        "-m", "--model", "--host", "--port", "--verbosity", "-a", "-c", "-ngl", "--temp", "--top-p", "--top-k", "--min-p",
         "-b", "-ub", "--parallel", "--threads", "--timeout", "--metrics", "--no-mmap", "--chat-template"
     ];
 
     static readonly Dictionary<string, bool> KnownOptionArity = new(StringComparer.Ordinal)
     {
-        ["-m"] = true, ["--model"] = true, ["--host"] = true, ["--port"] = true, ["-v"] = true, ["--verbosity"] = true, ["-a"] = true, ["-c"] = true,
+        ["-m"] = true, ["--model"] = true, ["--host"] = true, ["--port"] = true, ["-lv"] = true, ["--verbosity"] = true, ["-a"] = true, ["-c"] = true,
         ["-ngl"] = true, ["--cache-type-k"] = true, ["--cache-type-v"] = true, ["--flash-attn"] = true, ["-fa"] = true,
         ["--temp"] = true, ["--top-p"] = true, ["--top-k"] = true, ["--min-p"] = true, ["-b"] = true, ["-ub"] = true,
         ["--parallel"] = true, ["--threads"] = true, ["--timeout"] = true, ["--chat-template"] = true, ["--reasoning"] = true,

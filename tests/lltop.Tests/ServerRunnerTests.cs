@@ -24,7 +24,7 @@ public sealed class ServerRunnerTests
         Assert.Equal("0.2", args[args.IndexOf("--presence-penalty") + 1]);
         Assert.Equal("0.3", args[args.IndexOf("--frequency-penalty") + 1]);
         Assert.Equal("3600", args[args.IndexOf("--timeout") + 1]);
-        Assert.Equal("4", args[args.IndexOf("-v") + 1]);
+        Assert.Equal("4", args[args.IndexOf("--verbosity") + 1]);
     }
 
     [Fact]
@@ -32,11 +32,11 @@ public sealed class ServerRunnerTests
     {
         var args = ServerRunner.BuildArguments(new Profile
         {
-            Model = "/models/test.gguf", Verbosity = 2, ExtraArgs = ["-v", "3", "--verbosity=1"]
+            Model = "/models/test.gguf", Verbosity = 2, ExtraArgs = ["-lv", "3", "--verbosity=1"]
         }).ToList();
 
-        Assert.Equal(1, args.Count(x => x == "-v"));
-        Assert.Equal("2", args[args.IndexOf("-v") + 1]);
+        Assert.Equal(1, args.Count(x => x == "--verbosity"));
+        Assert.Equal("2", args[args.IndexOf("--verbosity") + 1]);
         Assert.DoesNotContain("3", args);
         Assert.DoesNotContain("--verbosity=1", args);
     }

@@ -224,7 +224,7 @@ sealed class ServerRunner : IDisposable
         segments.Add(new(["--port", p.Port.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "port"));
         Pair("--host", p.Host, "host");
         segments.Add(new(["--timeout", p.Timeout.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "server timeout"));
-        segments.Add(new(["-v", p.Verbosity.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "verbosity"));
+        segments.Add(new(["--verbosity", p.Verbosity.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "verbosity"));
         Pair("-a", p.Alias, "alias");
         segments.Add(new(["-c", p.Ctx.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "context"));
         segments.Add(new(["-ngl", p.Ngl.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "gpu layers"));
@@ -272,8 +272,8 @@ sealed class ServerRunner : IDisposable
             if (value.StartsWith("--mmproj=")) continue;
             if (value == "--spec-type" || value == "--spec-draft-n-max") { if (i + 1 < args.Count && !args[i + 1].StartsWith('-')) i++; continue; }
             if (value.StartsWith("--spec-type=") || value.StartsWith("--spec-draft-n-max=")) continue;
-            if (value is "-v" or "--verbosity") { if (i + 1 < args.Count && !args[i + 1].StartsWith('-')) i++; continue; }
-            if (value.StartsWith("-v=") || value.StartsWith("--verbosity=")) continue;
+            if (value is "-lv" or "--verbosity") { if (i + 1 < args.Count && !args[i + 1].StartsWith('-')) i++; continue; }
+            if (value.StartsWith("-lv=") || value.StartsWith("--verbosity=")) continue;
             yield return value;
         }
     }
