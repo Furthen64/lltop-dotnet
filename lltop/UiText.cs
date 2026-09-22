@@ -16,7 +16,7 @@ static class UiText
     static bool HasFavoritesDivider(int profileCount, int favoriteCount) => favoriteCount > 0 && favoriteCount < profileCount;
 
     // Columns: glyph · [V] slot · profile name · tags · image size. The [V] slot and the
-    // name column keep a fixed width so tags line up across rows; tags truncate before names do.
+    // name column keeps a fixed width so tags line up across rows; tags truncate before names do.
     public static List<string> ProfileRows(IEnumerable<ProfileRowData> source, int width)
     {
         var lines = new List<string>();
@@ -30,7 +30,7 @@ static class UiText
         if (parts.Count == 0) return lines;
         var hasTags = parts.Any(p => p.R.Tags.Any(t => !string.IsNullOrWhiteSpace(t)));
         var nameWidth = hasTags
-            ? Math.Clamp(parts.Max(p => MiddleEllipsize(p.R.Name, p.Avail).Length), 0, Math.Max(0, parts.Min(p => p.Avail) - 1))
+            ? Math.Clamp(parts.Max(p => MiddleEllipsize(p.R.Name, p.Avail).Length), 0, Math.Max(0, parts.Min(p => p.Avail) - 2))
             : 0;
         foreach (var part in parts)
         {
@@ -46,7 +46,7 @@ static class UiText
             }
             var tagText = string.Join(", ", part.R.Tags.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()));
             var middle = MiddleEllipsize(part.R.Name, nameWidth).PadRight(nameWidth);
-            if (tagText.Length > 0) middle += " " + MiddleEllipsize(tagText, Math.Max(0, part.Avail - nameWidth - 1));
+            if (tagText.Length > 0) middle += "  " + MiddleEllipsize($"({tagText})", Math.Max(0, part.Avail - nameWidth - 2));
             lines.Add(part.Prefix + middle.PadRight(part.Avail) + part.Suffix);
         }
         return lines;

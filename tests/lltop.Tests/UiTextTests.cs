@@ -73,7 +73,7 @@ public sealed class UiTextTests
         var row = Assert.Single(UiText.ProfileRows([new UiText.ProfileRowData("○", false, "alpha", ["fast", "coding"], "2.3G")], 50));
 
         Assert.Equal(50, row.Length);
-        Assert.Contains("fast, coding", row);
+        Assert.Contains("  (fast, coding)", row);
         Assert.DoesNotContain("…", row);
     }
 
