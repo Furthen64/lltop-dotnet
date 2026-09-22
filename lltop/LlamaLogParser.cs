@@ -93,7 +93,10 @@ internal static partial class LlamaLogParser
     private static partial Regex PromptEval();
     [GeneratedRegex(@"(?<!prompt )eval time =\s+(\d+\.\d+) ms /\s+(\d+) tokens.*?(\d+\.\d+) ms per token.*?(\d+\.\d+) tokens per second")]
     private static partial Regex Eval();
-    [GeneratedRegex(@"n_decoded\s*=\s*(\d+),\s*tg\s*=\s*(\d+(?:\.\d+)?)\s*t/s,\s*tg_3s\s*=\s*(\d+(?:\.\d+)?)\s*t/s")]
+    // llama-server omits tg_3s at higher verbosity levels.  Keep accepting the
+    // older, more detailed form, but do not discard the primary generation rate
+    // when that optional rolling-window metric is absent.
+    [GeneratedRegex(@"n_decoded\s*=\s*(\d+),\s*tg\s*=\s*(\d+(?:\.\d+)?)\s*t/s(?:,\s*tg_3s\s*=\s*(\d+(?:\.\d+)?)\s*t/s)?")]
     private static partial Regex GenerationProgress();
     [GeneratedRegex(@"total time =\s+(\d+\.\d+) ms /\s+(\d+) tokens")]
     private static partial Regex Total();

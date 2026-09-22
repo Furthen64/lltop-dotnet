@@ -81,6 +81,23 @@ public sealed class LlamaLogParserTests
     }
 
     [Fact]
+    public void ParsesVerboseGenerationThroughputWithoutThreeSecondRate()
+    {
+        // llama-server verbosity 4 omits tg_3s from its periodic telemetry.
+        const string line = "2.31.717.614 I slot print_timing: id 0 | task 0 | n_decoded =    101, tg =  40.13 t/s";
+
+        var parsed = LlamaLogParser.Parse(line);
+        var stats = new ServerStats();
+        stats.Consume(line);
+
+        Assert.Equal(101, parsed.DecodedTokens);
+        Assert.Equal(40.13, parsed.GenerationTokensPerSecond);
+        Assert.Equal(0, parsed.GenerationTokensPerSecond3s);
+        Assert.Equal(101, stats.GeneratedTokens);
+        Assert.Equal(40.13, stats.EvalTokensPerSecond);
+    }
+
+    [Fact]
     public void AveragesTheFirstTenGenerationRatesForEachRootRequest()
     {
         var stats = new ServerStats();
