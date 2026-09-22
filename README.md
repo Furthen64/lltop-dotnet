@@ -1,7 +1,7 @@
 # lltop-dotnet
 
 
-![Screenshot](media/screenshot.png)
+![Screenshot](media/screenshot_260923.png)
 
 A .NET 10 + Terminal.Gui v2 control center for llama.cpp's `llama-server`.
 
