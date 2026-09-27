@@ -82,7 +82,7 @@ var help = new Label { X = 1, Y = Pos.Bottom(statusFrame), Width = Dim.Fill(2), 
     Text = "[Enter] Start   [e/F2] Edit   [d] Duplicate   [x] Delete   [n] New   [Ctrl+F] Favorite\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [h/?] All keys   [q] Quit" };
 var resourceStrip = new ResourceStripView { X = 1, Y = Pos.Bottom(help), Width = Dim.Fill(2) };
 win.Add(banner, profileFrame, logFrame, statusFrame, metricsFrame, help, resourceStrip);
-LltopTheme.Apply([profileFrame, logFrame, statusFrame, metricsFrame], banner, profileList, logView, status, metrics, help, logStatus);
+LltopTheme.Apply([profileFrame, logFrame, statusFrame, metricsFrame], banner, profileList, logView, status, metrics, help, logStatus, readingProgress);
 
 ISystemResourceProvider resourceProvider = OperatingSystem.IsLinux()
     ? new LinuxSystemResourceProvider(
@@ -201,6 +201,8 @@ void UpdateStatus(string message = "")
         resourceGpuBackend = "";
         resourceGpuName = "";
         status.Text = $"STATE    {state}{pid}\n\nNo profiles found in {cfg.ProfilesDir}\n{message}";
+        readingProgress.Activity = null;
+        readingProgress.Progress = null;
         metrics.Text = "Request stats  Waiting for a server launch…";
         return;
     }
@@ -251,14 +253,19 @@ void UpdateStatus(string message = "")
         : "";
     lines.Add(notice);
     status.Text = string.Join('\n', lines);
+    var serverVisible = runner.IsActive || externalServer is not null;
+    var activity = serverStats.RequestActivityAt(DateTimeOffset.Now);
     var activeReading = serverStats.ActivePromptReading;
+    readingProgress.Activity = serverVisible ? activity : null;
     readingProgress.Progress = activeReading;
-    metrics.Y = activeReading is null ? 0 : Pos.Bottom(readingProgress);
-    metrics.Text = activeReading is null
-        ? runner.IsActive || externalServer is not null
-            ? UiText.RequestMetrics(serverStats)
-            : "Request stats  Waiting for a server launch…"
-        : "";
+    metrics.Y = serverVisible ? Pos.Bottom(readingProgress) : 0;
+    metrics.Text = !serverVisible
+        ? "Request stats  Waiting for a server launch…"
+        : activity.Phase is RequestPhase.Ready or RequestPhase.Accepted or RequestPhase.Ingesting or RequestPhase.Generating
+            ? ""
+            : serverStats.PromptTokensPerSecond > 0 || serverStats.EvalTokensPerSecond > 0
+                ? UiText.RequestMetrics(serverStats)
+                : "";
 }
 
 void RefreshLogs()
@@ -975,6 +982,7 @@ _ = Task.Run(async () =>
                         if (activeRunSamples.Count > 1800) activeRunSamples.RemoveAt(0);
                     }
                 }
+                if (runner.IsActive || externalServer is not null) UpdateStatus();
                 if (showingResourceGraph) RefreshLogs();
             });
             await Task.Delay(TimeSpan.FromSeconds(2), monitorCancellation.Token);

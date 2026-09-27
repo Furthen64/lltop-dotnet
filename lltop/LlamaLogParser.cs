@@ -22,6 +22,9 @@ internal sealed class ParsedLogLine
     public double Progress { get; init; }
     public double PromptProgressTokensPerSecond { get; init; }
     public bool IsRootRequestStart { get; init; }
+    public int CachedPromptTokens { get; init; }
+    public bool IsRequestEnd { get; init; }
+    public bool AreAllSlotsIdle { get; init; }
     public string ChatFormat { get; init; } = "";
     public int ContextSlotSize { get; init; }
     public int GpuTotalMiB { get; init; }
@@ -50,6 +53,8 @@ internal static partial class LlamaLogParser
         var offload = Offload().Match(line);
         var progress = Progress().Match(line);
         var requestStart = RequestStart().Match(line);
+        var cached = CachedPromptTokens().Match(line);
+        var requestEnd = RequestEnd().Match(line);
         var chat = ChatFormat().Match(line);
         var context = Context().Match(line);
         var memory = Memory().Match(line);
@@ -75,6 +80,8 @@ internal static partial class LlamaLogParser
             TotalMs = D(total, 1), TotalTokens = I(total, 2), OffloadedLayers = I(offload, 1), TotalLayers = I(offload, 2),
             PromptProgressTokens = I(progress, 1), Progress = D(progress, 2), PromptProgressTokensPerSecond = D(progress, 3),
             IsRootRequestStart = requestStart.Success && I(requestStart, 1) == 0,
+            CachedPromptTokens = I(cached, 1), IsRequestEnd = requestEnd.Success,
+            AreAllSlotsIdle = line.Contains("all slots are idle", StringComparison.OrdinalIgnoreCase),
             ChatFormat = chat.Success ? chat.Groups[1].Value.Trim() : "", ContextSlotSize = I(context, 1),
             GpuTotalMiB = I(memory, 2), GpuFreeMiB = I(memory, 3), GpuModelMiB = I(memory, 4), GpuContextMiB = I(memory, 5), GpuComputeMiB = I(memory, 6),
             RuntimeBackend = runtimeDevice.Success ? runtimeDevice.Groups[1].Value.ToUpperInvariant() : "",
@@ -106,6 +113,10 @@ internal static partial class LlamaLogParser
     private static partial Regex Progress();
     [GeneratedRegex(@"processing task, is_child\s*=\s*(\d+)")]
     private static partial Regex RequestStart();
+    [GeneratedRegex(@"cached n_tokens\s*=\s*(\d+)", RegexOptions.IgnoreCase)]
+    private static partial Regex CachedPromptTokens();
+    [GeneratedRegex(@"stop processing:\s*n_tokens\s*=\s*\d+,\s*truncated\s*=\s*\d+", RegexOptions.IgnoreCase)]
+    private static partial Regex RequestEnd();
     [GeneratedRegex(@"params_from_.*?Chat format: (.+)")]
     private static partial Regex ChatFormat();
     [GeneratedRegex(@"new prompt, n_ctx_slot = (\d+), n_keep = (\d+), task\.n_tokens = (\d+)")]
@@ -119,8 +130,16 @@ internal static partial class LlamaLogParser
 internal sealed class ServerStats
 {
     private const int ReadingRateWindowMinutes = 5;
+    private static readonly TimeSpan TelemetryQuietAfter = TimeSpan.FromSeconds(10);
     readonly List<double> initialGenerationSamples = [];
     readonly List<PromptProgressSample> promptProgressSamples = [];
+    DateTimeOffset? requestStartedAt;
+    DateTimeOffset? requestUpdatedAt;
+    DateTimeOffset? requestCompletedAt;
+    RequestPhase requestPhase = RequestPhase.Ready;
+    int requestNumber;
+    bool sawIngest;
+    bool sawOutput;
     public double PromptTokensPerSecond { get; private set; }
     public double EvalTokensPerSecond { get; private set; }
     public double GenerationTokensPerSecond3s { get; private set; }
@@ -173,10 +192,33 @@ internal sealed class ServerStats
     public string LastHint { get; private set; } = "";
     public List<RunIssue> Issues { get; } = [];
 
+    public RequestActivity RequestActivityAt(DateTimeOffset observedAt) => new(
+        requestPhase,
+        requestStartedAt is not null && requestCompletedAt is null,
+        requestStartedAt,
+        requestUpdatedAt,
+        requestCompletedAt,
+        requestNumber,
+        sawIngest,
+        sawOutput,
+        requestStartedAt is not null && requestCompletedAt is null && requestUpdatedAt is { } updated && observedAt - updated >= TelemetryQuietAfter,
+        requestStartedAt is null ? TimeSpan.Zero : observedAt - requestStartedAt.Value,
+        requestUpdatedAt is null ? TimeSpan.Zero : observedAt - requestUpdatedAt.Value);
+
     public void Consume(string line, DateTimeOffset? startedAt = null, DateTimeOffset? observedAt = null)
     {
+        var seenAt = observedAt ?? DateTimeOffset.Now;
         var p = LlamaLogParser.Parse(line);
-        if (p.IsRootRequestStart) ResetRequestMetrics();
+        if (p.IsRootRequestStart)
+        {
+            ResetRequestMetrics();
+            BeginRequest(seenAt);
+        }
+        else if (p.ContextSlotSize > 0 && requestStartedAt is null) BeginRequest(seenAt);
+
+        if (p.CachedPromptTokens > 0 || p.Progress > 0) TrackPhase(RequestPhase.Ingesting, seenAt);
+        if (p.GenerationTokensPerSecond > 0) TrackPhase(RequestPhase.Generating, seenAt);
+        if (p.IsRequestEnd || p.AreAllSlotsIdle) CompleteRequest(seenAt);
         if (p.PromptTokensPerSecond > 0) { PromptTokensPerSecond = p.PromptTokensPerSecond; PromptTokens = p.PromptTokens; }
         if (p.EvalTokensPerSecond > 0) { EvalTokensPerSecond = p.EvalTokensPerSecond; GeneratedTokens = p.EvalTokens; }
         if (p.GenerationTokensPerSecond > 0)
@@ -192,7 +234,7 @@ internal sealed class ServerStats
             Progress = p.Progress;
             PromptProgressTokens = p.PromptProgressTokens;
             PromptProgressTokensPerSecond = p.PromptProgressTokensPerSecond;
-            RecordPromptProgress(observedAt ?? DateTimeOffset.Now, p.PromptProgressTokens);
+            RecordPromptProgress(seenAt, p.PromptProgressTokens);
         }
         if (p.ChatFormat.Length > 0) ChatFormat = p.ChatFormat;
         if (p.ContextSlotSize > 0) ContextSlotSize = p.ContextSlotSize;
@@ -220,6 +262,35 @@ internal sealed class ServerStats
         initialGenerationSamples.Clear();
     }
 
+    void BeginRequest(DateTimeOffset observedAt)
+    {
+        requestStartedAt = observedAt;
+        requestUpdatedAt = observedAt;
+        requestCompletedAt = null;
+        requestPhase = RequestPhase.Accepted;
+        requestNumber++;
+        sawIngest = false;
+        sawOutput = false;
+    }
+
+    void TrackPhase(RequestPhase phase, DateTimeOffset observedAt)
+    {
+        if (requestStartedAt is null) BeginRequest(observedAt);
+        if (requestCompletedAt is not null) return;
+        requestPhase = phase;
+        requestUpdatedAt = observedAt;
+        if (phase == RequestPhase.Ingesting) sawIngest = true;
+        if (phase == RequestPhase.Generating) sawOutput = true;
+    }
+
+    void CompleteRequest(DateTimeOffset observedAt)
+    {
+        if (requestStartedAt is null || requestCompletedAt is not null) return;
+        requestPhase = RequestPhase.Completed;
+        requestUpdatedAt = observedAt;
+        requestCompletedAt = observedAt;
+    }
+
     void RecordPromptProgress(DateTimeOffset observedAt, int tokens)
     {
         if (tokens <= 0) return;
@@ -231,6 +302,23 @@ internal sealed class ServerStats
 
     readonly record struct PromptProgressSample(DateTimeOffset Timestamp, int Tokens);
 }
+
+internal enum RequestPhase { Ready, Accepted, Ingesting, Generating, Completed }
+
+// This describes server-visible work only. A client-side agent may think or run
+// tools between requests, which llama-server deliberately cannot observe.
+internal sealed record RequestActivity(
+    RequestPhase Phase,
+    bool IsActive,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? UpdatedAt,
+    DateTimeOffset? CompletedAt,
+    int Number,
+    bool SawIngest,
+    bool SawOutput,
+    bool TelemetryQuiet,
+    TimeSpan Elapsed,
+    TimeSpan SinceLastActivity);
 
 internal sealed record PromptReadingProgress(
     double Fraction,

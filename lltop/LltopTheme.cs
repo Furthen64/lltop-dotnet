@@ -99,7 +99,8 @@ internal static class LltopTheme
         Label status,
         Label metrics,
         Label help,
-        Label logStatus)
+        Label logStatus,
+        RequestMetricsView readingProgress)
     {
         var normal = profileList.GetScheme().Normal;
 
@@ -118,6 +119,7 @@ internal static class LltopTheme
         logView.PanelAttribute = normal;
         Override(status, _ => normal);
         Override(metrics, _ => normal);
+        Override(readingProgress, _ => normal);
     }
 
 #pragma warning disable CS0618 // Terminal.Gui 2.4 ships TextView as its built-in read-only text control.

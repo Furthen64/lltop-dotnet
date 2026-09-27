@@ -98,6 +98,47 @@ public sealed class LlamaLogParserTests
     }
 
     [Fact]
+    public void TracksServerVisibleRequestTimeline()
+    {
+        var stats = new ServerStats();
+        var started = new DateTimeOffset(2026, 9, 23, 12, 0, 0, TimeSpan.Zero);
+
+        stats.Consume("slot launch_slot_: id 0 | task 42 | processing task, is_child = 0", observedAt: started);
+        var accepted = stats.RequestActivityAt(started.AddSeconds(2));
+        Assert.Equal(RequestPhase.Accepted, accepted.Phase);
+        Assert.True(accepted.IsActive);
+        Assert.Equal(1, accepted.Number);
+
+        stats.Consume("slot operator(): id 0 | task 42 | cached n_tokens = 512, memory_seq_rm [512, end)", observedAt: started.AddSeconds(3));
+        var ingesting = stats.RequestActivityAt(started.AddSeconds(4));
+        Assert.Equal(RequestPhase.Ingesting, ingesting.Phase);
+        Assert.True(ingesting.SawIngest);
+
+        stats.Consume("slot print_timing: id 0 | task 42 | n_decoded = 101, tg = 40.13 t/s", observedAt: started.AddSeconds(5));
+        var generating = stats.RequestActivityAt(started.AddSeconds(6));
+        Assert.Equal(RequestPhase.Generating, generating.Phase);
+        Assert.True(generating.SawOutput);
+
+        stats.Consume("slot release: id 0 | task 42 | stop processing: n_tokens = 613, truncated = 0", observedAt: started.AddSeconds(7));
+        var completed = stats.RequestActivityAt(started.AddSeconds(8));
+        Assert.Equal(RequestPhase.Completed, completed.Phase);
+        Assert.False(completed.IsActive);
+    }
+
+    [Fact]
+    public void MarksAnActiveRequestWhenServerTelemetryGoesQuiet()
+    {
+        var stats = new ServerStats();
+        var started = new DateTimeOffset(2026, 9, 23, 12, 0, 0, TimeSpan.Zero);
+
+        stats.Consume("processing task, is_child = 0", observedAt: started);
+
+        var activity = stats.RequestActivityAt(started.AddSeconds(10));
+        Assert.True(activity.IsActive);
+        Assert.True(activity.TelemetryQuiet);
+    }
+
+    [Fact]
     public void AveragesTheFirstTenGenerationRatesForEachRootRequest()
     {
         var stats = new ServerStats();
