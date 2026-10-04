@@ -58,15 +58,18 @@ internal sealed class RequestMetricsView : View
         if (progress is { } reading && request.Phase == RequestPhase.Ingesting)
         {
             var total = reading.EstimatedTotalTokens > 0 ? $"~{reading.EstimatedTotalTokens:N0}" : "estimating";
-            Write(2, $"Input  {reading.ReadTokens:N0} / {total} tokens", normal);
-            WriteRight(2, reading.TokensPerSecond > 0 ? $"{reading.TokensPerSecond:F1} tok/s" : "measuring rate…", normal);
+            DrawProgressBar(reading.Fraction, normal);
+            Write(3, $"Input  {reading.ReadTokens:N0} / {total} tokens", normal);
+            WriteRight(3, reading.TokensPerSecond > 0 ? $"{reading.TokensPerSecond:F1} tok/s" : "measuring rate…", normal);
             var eta = Eta(reading);
             var window = reading.UsesRollingWindow ? $"rolling {FormatDuration(reading.SampleDuration)} sample" : "rolling sample warming up";
-            Write(3, $"{window}  ·  {eta}", new TuiAttribute(LltopTheme.Muted, normal.Background));
+            Write(4, $"{window}  ·  {eta}", new TuiAttribute(LltopTheme.Muted, normal.Background));
         }
-        else Write(2, Detail(request), new TuiAttribute(LltopTheme.Muted, normal.Background));
-
-        Write(4, "Server phases only · client thought and tools happen between requests", new TuiAttribute(LltopTheme.Muted, normal.Background));
+        else
+        {
+            Write(2, Detail(request), new TuiAttribute(LltopTheme.Muted, normal.Background));
+            Write(4, "Server phases only · client thought and tools happen between requests", new TuiAttribute(LltopTheme.Muted, normal.Background));
+        }
         return true;
     }
 
@@ -112,6 +115,22 @@ internal sealed class RequestMetricsView : View
         Move(Viewport.Width - text.Length, y);
         SetAttribute(attribute);
         AddStr(text);
+    }
+
+    void DrawProgressBar(double fraction, TuiAttribute normal)
+    {
+        if (Viewport.Width < 3 || Viewport.Height < 3) return;
+        var width = Viewport.Width - 2;
+        var filled = Math.Clamp((int)Math.Round(Math.Clamp(fraction, 0, 1) * width, MidpointRounding.AwayFromZero), 0, width);
+        Move(0, 2);
+        SetAttribute(new TuiAttribute(LltopTheme.PanelBorder, normal.Background));
+        AddRune('[');
+        SetAttribute(new TuiAttribute(LltopTheme.Highlight, normal.Background, TextStyle.Bold));
+        AddStr(new string('#', filled));
+        SetAttribute(new TuiAttribute(LltopTheme.Muted, normal.Background, TextStyle.Faint));
+        AddStr(new string('.', width - filled));
+        SetAttribute(new TuiAttribute(LltopTheme.PanelBorder, normal.Background));
+        AddRune(']');
     }
 
     static string Eta(PromptReadingProgress value) => value.EstimatedRemaining is { } remaining
