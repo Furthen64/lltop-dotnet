@@ -40,7 +40,8 @@ Run with:
 and prints installation instructions when it is missing.
 
 The main keys are shown in the application footer. Press `d` to duplicate the
-selected profile, `H` for run history and notes, `g` for its resource graph, `c` to copy the launch command,
+selected profile, `Ctrl+X` to remove profiles whose model files are missing,
+`H` for run history and notes, `g` for its resource graph, `c` to copy the launch command,
 and `l` to toggle log autoscroll. Profiles
 are stored under `~/.config/lltop/profiles` and run records under
 `~/.config/lltop/runs` by default.

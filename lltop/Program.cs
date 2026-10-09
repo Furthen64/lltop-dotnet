@@ -81,7 +81,7 @@ var metrics = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill()
 var readingProgress = new RequestMetricsView { X = 1, Y = 0, Width = Dim.Fill(2) };
 metricsFrame.Add(readingProgress, metrics);
 var help = new Label { X = 1, Y = Pos.Bottom(statusFrame), Width = Dim.Fill(2), Height = 3,
-    Text = "[Enter] Start   [e/F2] Edit   [d] Duplicate   [x] Delete   [n] New   [Ctrl+F] Favorite\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [h/?] All keys   [q] Quit" };
+    Text = "[Enter] Start   [e/F2] Edit   [d] Duplicate   [x] Delete   [Ctrl+X] Prune\n[n] New   [Ctrl+F] Favorite   [↑/↓] Select   [s] Stop   [g] Graph   [H] History   [h/?] All keys   [q] Quit" };
 var resourceStrip = new ResourceStripView { X = 1, Y = Pos.Bottom(help), Width = Dim.Fill(2) };
 win.Add(banner, profileFrame, logFrame, statusFrame, metricsFrame, help, resourceStrip);
 LltopTheme.Apply([profileFrame, logFrame, statusFrame, metricsFrame], banner, profileList, logView, status, metrics, help, logStatus, readingProgress);
@@ -103,8 +103,8 @@ void ApplyLayout()
     var helpHeight = expandedHelp ? 6 : 2;
     help.Height = helpHeight;
     help.Text = expandedHelp
-        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e/F2] Edit   [d] Duplicate   [x] Delete   [Ctrl+F] Favorite/unfavorite   [Ctrl+R/F5] Find models\nBENCHMARK   [b] Setup/start   [B] Cancel   idle server required   reports → benchmarks_dir\nLOG & RUNS  [g] Resource graph   [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nTHEME       [t] Cycle theme ({LltopTheme.CurrentName})   [h/?] Show fewer keys"
-        : $"[Enter] Start   [e/F2] Edit   [d] Duplicate   [x] Delete   [n] New   [Ctrl+F] Favorite\n[↑/↓] Select   [s] Stop   [g] Graph   [H] History   [t] Theme: {LltopTheme.CurrentName}   [h/?] All keys   [q] Quit";
+        ? "NAVIGATION  [↑/↓] Select   [Enter] Start   [q/Esc] Quit\nSERVER      [s] Stop   [K] Force stop   [r] Restart   [p] Preview   [c] Copy command\nPROFILES    [n] New   [e/F2] Edit   [d] Duplicate   [x] Delete   [Ctrl+X] Prune missing-model profiles   [Ctrl+F] Favorite/unfavorite   [Ctrl+R/F5] Find models\nBENCHMARK   [b] Setup/start   [B] Cancel   idle server required   reports → benchmarks_dir\nLOG & RUNS  [g] Resource graph   [l] Toggle follow   [↑/PgUp] Pause log follow   [↓/PgDn/End] Resume at bottom   [H] History\nTHEME       [t] Cycle theme ({LltopTheme.CurrentName})   [h/?] Show fewer keys"
+        : $"[Enter] Start   [e/F2] Edit   [d] Duplicate   [x] Delete   [Ctrl+X] Prune\n[n] New   [Ctrl+F] Favorite   [↑/↓] Select   [s] Stop   [g] Graph   [H] History   [t] Theme: {LltopTheme.CurrentName}   [h/?] All keys   [q] Quit";
     var narrow = win.Viewport.Width is > 0 and < 84;
     var reserved = (narrow ? 20 : 10) + helpHeight + 1;
     if (narrow)
@@ -775,6 +775,40 @@ void DeleteSelected()
     catch (Exception ex) { UpdateStatus(ex.Message); }
 }
 
+void DeleteProfilesForMissingModels()
+{
+    var staleProfiles = profiles
+        .Where(p => !string.IsNullOrWhiteSpace(p.Model) && !File.Exists(AppConfig.Expand(p.Model)))
+        .ToList();
+    var activeProfileKept = staleProfiles.RemoveAll(p => runner.IsActive && p.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase)) > 0;
+    if (staleProfiles.Count == 0)
+    {
+        UpdateStatus(activeProfileKept
+            ? $"The active profile {runningProfile} has a missing model and was kept."
+            : "No profiles found for missing models.");
+        return;
+    }
+
+    var countLabel = $"{staleProfiles.Count} profile{(staleProfiles.Count == 1 ? "" : "s")} will be deleted.";
+    var activeLabel = activeProfileKept ? $"\nThe active profile {runningProfile} will be kept." : "";
+    var answer = MessageBox.Query(app, "Delete stale profiles", $"Delete all profiles for models not found anymore?\n\n{countLabel}{activeLabel}", "Cancel", "Delete");
+    if (answer != 1) return;
+
+    var deleted = 0;
+    var errors = new List<string>();
+    foreach (var profile in staleProfiles)
+    {
+        try { store.Delete(profile); deleted++; }
+        catch (Exception ex) { errors.Add($"{profile.Name}: {ex.Message}"); }
+    }
+
+    var message = $"Deleted {deleted} stale profile{(deleted == 1 ? "" : "s")}.";
+    if (activeProfileKept) message += $" Kept active profile {runningProfile}.";
+    if (errors.Count > 0) message += $" Could not delete: {string.Join(" | ", errors)}";
+    if (deleted > 0) ReloadProfiles(message: message);
+    else UpdateStatus(message);
+}
+
 void ToggleFavorite()
 {
     var profile = SelectedProfile();
@@ -789,6 +823,7 @@ void ToggleFavorite()
 }
 
 bool IsCtrlF(Key key) => key.IsCtrl && key.NoCtrl.NoShift.KeyCode == KeyCode.F;
+bool IsCtrlX(Key key) => key.IsCtrl && key.NoCtrl.NoShift.KeyCode == KeyCode.X;
 
 async Task Quit()
 {
@@ -899,6 +934,7 @@ app.Keyboard.KeyDown += (_, key) =>
     else if (text == "s") { _ = Stop(false); key.Handled = true; }
     else if (text == "K") { _ = Stop(true); key.Handled = true; }
     else if (key.KeyCode == (KeyCode.R | KeyCode.CtrlMask)) { RefreshModels(); key.Handled = true; }
+    else if (IsCtrlX(key)) { DeleteProfilesForMissingModels(); key.Handled = true; }
     else if (IsCtrlF(key)) { ToggleFavorite(); key.Handled = true; }
     else if (text.Equals("r", StringComparison.OrdinalIgnoreCase)) { _ = Launch(true); key.Handled = true; }
     else if (text == "n") { NewProfile(); key.Handled = true; }
