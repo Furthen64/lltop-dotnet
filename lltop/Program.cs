@@ -46,7 +46,9 @@ var activeRunSamples = new List<RunResourceSample>();
 RunGraphDataWriter? activeRunGraphData = null;
 var profileItems = new ObservableCollection<string>();
 var historySummaries = new Dictionary<string, ProfileRunSummary>(StringComparer.OrdinalIgnoreCase);
+var historySummaryGeneration = 0;
 var closing = false;
+var currentStatusMessage = "";
 var logAutoScroll = true;
 var logScrollRow = 0;
 var showingResourceGraph = false;
@@ -180,17 +182,33 @@ Profile? SelectedProfile() => profiles.Count == 0 ? null : profiles[Math.Clamp(s
 
 ProfileRunSummary? SummaryFor(string profileName)
 {
-    try
+    return historySummaries.TryGetValue(profileName, out var summary) ? summary : null;
+}
+
+void RebuildHistorySummariesInBackground()
+{
+    var generation = Interlocked.Increment(ref historySummaryGeneration);
+    _ = Task.Run(() => RunHistory.SummarizeAll(cfg.RunsDir)).ContinueWith(task =>
     {
-        if (!historySummaries.TryGetValue(profileName, out var summary))
-            historySummaries[profileName] = summary = RunHistory.Summarize(cfg.RunsDir, profileName);
-        return summary;
-    }
-    catch { return null; }
+        if (!task.IsCompletedSuccessfully) return;
+        try
+        {
+            app.Invoke(() =>
+            {
+                if (closing || generation != Volatile.Read(ref historySummaryGeneration)) return;
+                historySummaries.Clear();
+                foreach (var (name, summary) in task.Result) historySummaries[name] = summary;
+                RefreshProfileItems(runningProfile);
+                UpdateStatus(currentStatusMessage);
+            });
+        }
+        catch { }
+    }, TaskScheduler.Default);
 }
 
 void UpdateStatus(string message = "")
 {
+    currentStatusMessage = message;
     var p = SelectedProfile();
     var state = runner.IsActive ? runner.State.ToString().ToUpperInvariant() : externalServer is null ? runner.State.ToString().ToUpperInvariant() : $"EXTERNAL {externalServer.State.ToString().ToUpperInvariant()}";
     var pidValue = runner.ProcessId ?? externalServer?.Pid;
@@ -451,14 +469,13 @@ void SaveActiveRun(ServerExit exit)
             activeRunGraphData = null;
         }
     }
-    historySummaries.Remove(profile.Name);
+    RebuildHistorySummariesInBackground();
 }
 
 void ReloadProfiles(string? selectName = null, string message = "Profiles reloaded.")
 {
     var result = store.LoadAll();
     profiles = result.Profiles;
-    historySummaries.Clear();
     RefreshProfileItems(selectName);
     RefreshLogs();
     var suffix = result.Errors.Count == 0 ? message : $"{message}  Skipped: {string.Join(" | ", result.Errors)}";
@@ -929,6 +946,7 @@ app.Keyboard.KeyDown += (_, key) =>
 RefreshLogs();
 var startupMessage = !knownTheme ? $"Unknown theme '{cfg.Theme}'; using Midnight." : removedLegacyStarter ? "Removed the obsolete empty starter profile." : cfg.LoadMessage;
 UpdateStatus(load.Errors.Count == 0 ? startupMessage : $"Skipped invalid profiles: {string.Join(" | ", load.Errors)}");
+RebuildHistorySummariesInBackground();
 _ = Task.Run(async () =>
 {
     while (!monitorCancellation.IsCancellationRequested)

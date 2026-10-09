@@ -134,6 +134,20 @@ internal static class RunHistory
     public static ProfileRunSummary Summarize(string directory, string profile)
     {
         var records = ForProfile(directory, profile).Select(x => x.Record).OrderBy(x => x.StartedAt).ToList();
+        return Summarize(profile, records);
+    }
+
+    public static Dictionary<string, ProfileRunSummary> SummarizeAll(string directory)
+    {
+        return Load(directory)
+            .Select(x => x.Record)
+            .GroupBy(x => x.ProfileName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => Summarize(group.Key, group), StringComparer.OrdinalIgnoreCase);
+    }
+
+    static ProfileRunSummary Summarize(string profile, IEnumerable<RunRecord> source)
+    {
+        var records = source.OrderBy(x => x.StartedAt).ToList();
         var latest = records.LastOrDefault();
         return new(profile, records.Count, Summary(records.Select(x => x.PromptTokensPerSecond)), Summary(records.Select(x => x.EvalTokensPerSecond)), latest?.StartedAt, latest?.ExitCode);
     }
