@@ -3,6 +3,7 @@ using System.Text;
 
 sealed class Profile
 {
+    public const int DefaultReasoningBudget = 4096;
     public string Name { get; set; } = "";
     public string Description { get; set; } = "";
     public bool Favorite { get; set; }
@@ -42,7 +43,7 @@ sealed class Profile
     public bool NoMmap { get; set; } = true;
     public string ChatTemplate { get; set; } = "";
     public string Reasoning { get; set; } = "auto";
-    public int ReasoningBudget { get; set; } = -1;
+    public int ReasoningBudget { get; set; } = DefaultReasoningBudget;
     public string ReasoningEffort { get; set; } = "";
     public bool Mtp { get; set; }
     public int MtpDraftTokens { get; set; }
@@ -86,7 +87,7 @@ sealed class Profile
         Metrics = true;
         NoMmap = true;
         Reasoning = "auto";
-        ReasoningBudget = -1;
+        ReasoningBudget = DefaultReasoningBudget;
         ReasoningEffort = "";
         Timeout = 3600;
         Verbosity = 4;
@@ -119,7 +120,7 @@ sealed class Profile
             throw new InvalidOperationException("Flash attention must be auto, on, or off.");
         if (!new[] { "", "auto", "on", "off" }.Contains(Reasoning, StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException("Reasoning must be auto, on, or off.");
-        if (ReasoningBudget < -1) throw new InvalidOperationException("Reasoning budget must be -1 or greater.");
+        if (ReasoningBudget < 0) throw new InvalidOperationException("Reasoning budget must be zero or greater.");
         if (!new[] { "", "default", "minimal", "low", "medium", "high", "xhigh", "max" }.Contains(ReasoningEffort, StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException("Effort must be blank, default, minimal, low, medium, high, xhigh, or max; model support varies.");
         if (Mtp && MtpDraftTokens < 1) throw new InvalidOperationException("MTP draft tokens must be at least 1 when MTP is on.");
@@ -165,6 +166,7 @@ sealed class ProfileStore(string directory)
                 var profile = new Profile();
                 Toml.ReadInto(path, profile);
                 MigrateLegacyMtpSettings(profile);
+                if (profile.ReasoningBudget == -1) profile.ReasoningBudget = Profile.DefaultReasoningBudget;
                 if (string.IsNullOrWhiteSpace(profile.Name)) profile.Name = Path.GetFileNameWithoutExtension(path);
                 profile.Model = AppConfig.Expand(profile.Model);
                 profile.Mmproj = AppConfig.Expand(profile.Mmproj);

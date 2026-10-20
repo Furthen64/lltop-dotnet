@@ -270,7 +270,6 @@ static class FirstRunProfiles
     {
         if (capabilities is null) return;
         if (!capabilities.SupportsOption("--reasoning")) profile.Reasoning = "";
-        if (!capabilities.SupportsOption("--reasoning-budget")) profile.ReasoningBudget = -1;
         if (!capabilities.SupportsOption("--chat-template")) profile.ChatTemplate = "";
         if (!capabilities.SupportsOption("--jinja")) profile.Jinja = false;
         if (!capabilities.SupportsOption("--metrics")) profile.Metrics = false;
