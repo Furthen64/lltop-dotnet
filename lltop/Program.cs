@@ -1302,10 +1302,18 @@ static string CompactProjectorSizes(string path)
         return "";
     }
 
-    static string CompactSize(string size) => size.Replace(" KiB", "K", StringComparison.Ordinal)
-        .Replace(" MiB", "M", StringComparison.Ordinal)
-        .Replace(" GiB", "G", StringComparison.Ordinal)
-        .Replace(" TiB", "T", StringComparison.Ordinal);
+    static string CompactSize(string size)
+    {
+        var parts = size.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 2 && double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+        {
+            if (parts[1].Equals("MiB", StringComparison.Ordinal)) return $"{value / 1000d:F2}G";
+            if (parts[1].Equals("GiB", StringComparison.Ordinal)) return $"{value:F2}G";
+            if (parts[1].Equals("TiB", StringComparison.Ordinal)) return $"{value * 1000d:F2}G";
+        }
+        return size.Replace(" KiB", "K", StringComparison.Ordinal)
+            .Replace(" B", "B", StringComparison.Ordinal);
+    }
 }
 static string ModelSize(string path)
 {
