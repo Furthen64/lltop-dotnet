@@ -3,7 +3,13 @@ static class UiText
     public static string ProfileGlyph(bool isBroken, bool isRunning) =>
         isBroken ? "💥" : isRunning ? "●" : "○";
 
-    public sealed record ProfileRowData(string Marker, bool Vision, string Name, IReadOnlyList<string> Tags, string Size);
+    public sealed record ProfileRowData(string Marker, bool Vision, string Name, IReadOnlyList<string> Tags, string ModelSize, string MmSize)
+    {
+        public ProfileRowData(string marker, bool vision, string name, IReadOnlyList<string> tags, string size)
+            : this(marker, vision, name, tags, size, "") => LegacySingleSize = true;
+
+        public bool LegacySingleSize { get; init; }
+    }
 
     public static int ProfileListItem(int profileIndex, int profileCount, int favoriteCount) =>
         profileIndex + (HasFavoritesDivider(profileCount, favoriteCount) && profileIndex >= favoriteCount ? 1 : 0);
@@ -13,21 +19,54 @@ static class UiText
             ? requestedItem
             : Math.Clamp(requestedItem + (requestedItem < previousItem ? -1 : 1), 0, profileCount);
 
+    public static string ProfileHeader(int width)
+    {
+        var columns = ProfileColumnWidths(width);
+        return new string(' ', columns.Prefix)
+            + MiddleEllipsize("PROFILE", columns.Name).PadRight(columns.Name)
+            + new string(' ', columns.Gap) + MiddleEllipsize("TAGS", columns.Tags).PadRight(columns.Tags)
+            + new string(' ', columns.Gap) + MiddleEllipsize("MODELSIZE", columns.ModelSize).PadLeft(columns.ModelSize)
+            + new string(' ', columns.Gap) + MiddleEllipsize("MMSIZE", columns.MmSize).PadLeft(columns.MmSize);
+    }
+
     static bool HasFavoritesDivider(int profileCount, int favoriteCount) => favoriteCount > 0 && favoriteCount < profileCount;
 
-    // Columns: glyph · [V] slot · profile name · tags · image size. The [V] slot and the
-    // name column keeps a fixed width so tags line up across rows; tags truncate before names do.
+    // Columns: glyph · [V] slot · profile · tags · model size · projector size.
     public static List<string> ProfileRows(IEnumerable<ProfileRowData> source, int width)
     {
         var lines = new List<string>();
         width = Math.Max(12, width);
         var parts = source.Select(r =>
         {
-            var prefix = r.Marker + " " + (r.Vision ? "[V] " : "    ");
-            var suffix = string.IsNullOrWhiteSpace(r.Size) ? "" : $" {r.Size}";
-            return (R: r, Prefix: prefix, Suffix: suffix, Avail: Math.Max(1, width - prefix.Length - suffix.Length));
+            var prefix = r.Marker == "💥"
+                ? r.Marker + " " + (r.Vision ? "[V]" : "   ")
+                : r.Marker + " " + (r.Vision ? "[V] " : "    ");
+            return (R: r, Prefix: prefix);
         }).ToList();
         if (parts.Count == 0) return lines;
+        if (parts.All(p => p.R.LegacySingleSize)) return LegacyProfileRows(parts.Select(p => p.R), width);
+        var columns = ProfileColumnWidths(width);
+        foreach (var part in parts)
+        {
+            var tagText = string.Join(", ", part.R.Tags.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()));
+            lines.Add(part.Prefix
+                + MiddleEllipsize(part.R.Name, columns.Name).PadRight(columns.Name)
+                + new string(' ', columns.Gap) + MiddleEllipsize(tagText, columns.Tags).PadRight(columns.Tags)
+                + new string(' ', columns.Gap) + MiddleEllipsize(part.R.ModelSize, columns.ModelSize).PadLeft(columns.ModelSize)
+                + new string(' ', columns.Gap) + MiddleEllipsize(part.R.MmSize, columns.MmSize).PadLeft(columns.MmSize));
+        }
+        return lines;
+    }
+
+    static List<string> LegacyProfileRows(IEnumerable<ProfileRowData> source, int width)
+    {
+        var rows = new List<string>();
+        var parts = source.Select(r =>
+        {
+            var prefix = r.Marker + " " + (r.Vision ? "[V] " : "    ");
+            var suffix = string.IsNullOrWhiteSpace(r.ModelSize) ? "" : $" {r.ModelSize}";
+            return (R: r, Prefix: prefix, Suffix: suffix, Avail: Math.Max(1, width - prefix.Length - suffix.Length));
+        }).ToList();
         var hasTags = parts.Any(p => p.R.Tags.Any(t => !string.IsNullOrWhiteSpace(t)));
         var nameWidth = hasTags
             ? Math.Clamp(parts.Max(p => MiddleEllipsize(p.R.Name, p.Avail).Length), 0, Math.Max(0, parts.Min(p => p.Avail) - 2))
@@ -36,20 +75,36 @@ static class UiText
         {
             if (part.Prefix.Length + part.Suffix.Length >= width)
             {
-                lines.Add(MiddleEllipsize(part.Prefix + part.R.Name + part.Suffix, width));
+                rows.Add(MiddleEllipsize(part.Prefix + part.R.Name + part.Suffix, width));
                 continue;
             }
             if (!hasTags)
             {
-                lines.Add(part.Prefix + MiddleEllipsize(part.R.Name, part.Avail).PadRight(part.Avail) + part.Suffix);
+                rows.Add(part.Prefix + MiddleEllipsize(part.R.Name, part.Avail).PadRight(part.Avail) + part.Suffix);
                 continue;
             }
             var tagText = string.Join(", ", part.R.Tags.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()));
             var middle = MiddleEllipsize(part.R.Name, nameWidth).PadRight(nameWidth);
             if (tagText.Length > 0) middle += "  " + MiddleEllipsize($"({tagText})", Math.Max(0, part.Avail - nameWidth - 2));
-            lines.Add(part.Prefix + middle.PadRight(part.Avail) + part.Suffix);
+            rows.Add(part.Prefix + middle.PadRight(part.Avail) + part.Suffix);
         }
-        return lines;
+        return rows;
+    }
+
+    static (int Prefix, int Gap, int Name, int Tags, int ModelSize, int MmSize) ProfileColumnWidths(int width)
+    {
+        width = Math.Max(12, width);
+        const int prefix = 6;
+        var gap = width >= 45 ? 2 : 1;
+        var available = Math.Max(0, width - prefix - gap * 3);
+        var mmSize = Math.Min(16, Math.Max(6, width / 4));
+        var modelSize = 9;
+        while (modelSize + mmSize > available && mmSize > 1) mmSize--;
+        while (modelSize + mmSize > available && modelSize > 1) modelSize--;
+        var flexible = Math.Max(0, available - modelSize - mmSize);
+        var name = flexible == 0 ? 0 : Math.Max(1, flexible * 2 / 3);
+        var tags = flexible - name;
+        return (prefix, gap, name, tags, modelSize, mmSize);
     }
 
     public static string MiddleEllipsize(string value, int width)

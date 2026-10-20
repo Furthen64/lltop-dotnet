@@ -69,10 +69,11 @@ var win = new Window { Title = " lltop · llama.cpp control center ", X = 0, Y =
 var banner = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Text = "LLAMA SERVER  •  profiles, launches, and live output" };
 var profileFrame = new FrameView { Title = " Profiles ", X = 0, Y = 2, Width = Dim.Percent(34), Height = Dim.Fill(13) };
 var logFrame = new FrameView { Title = " Profile overview ", X = Pos.Right(profileFrame), Y = 2, Width = Dim.Fill(), Height = Dim.Fill(13) };
-var profileList = new ListView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+var profileHeader = new Label { X = 0, Y = 0, Width = Dim.Fill(), Height = 1 };
+var profileList = new ListView { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(1) };
 var logView = new LogTextView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(1), ReadOnly = true, WordWrap = false, Text = "Waiting for a server launch…" };
 var logStatus = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Height = 1 };
-profileFrame.Add(profileList); logFrame.Add(logView, logStatus);
+profileFrame.Add(profileHeader, profileList); logFrame.Add(logView, logStatus);
 var statusFrame = new FrameView { Title = " Selected profile / server ", X = 0, Y = Pos.Bottom(profileFrame), Width = Dim.Percent(34), Height = 10 };
 var status = new Label { X = 1, Y = 0, Width = Dim.Fill(2), Height = Dim.Fill(), Text = "Loading…" };
 statusFrame.Add(status);
@@ -117,9 +118,10 @@ void ApplyLayout()
     }
     else
     {
-        profileFrame.X = 0; profileFrame.Y = 2; profileFrame.Width = Dim.Percent(34); profileFrame.Height = Dim.Fill(reserved);
+        var profileWidth = runner.State == RunnerState.Running ? 30 : 60;
+        profileFrame.X = 0; profileFrame.Y = 2; profileFrame.Width = Dim.Percent(profileWidth); profileFrame.Height = Dim.Fill(reserved);
         logFrame.X = Pos.Right(profileFrame); logFrame.Y = 2; logFrame.Width = Dim.Fill(); logFrame.Height = Dim.Fill(reserved);
-        statusFrame.X = 0; statusFrame.Y = Pos.Bottom(profileFrame); statusFrame.Width = Dim.Percent(34);
+        statusFrame.X = 0; statusFrame.Y = Pos.Bottom(profileFrame); statusFrame.Width = Dim.Percent(profileWidth);
         metricsFrame.X = Pos.Right(statusFrame); metricsFrame.Y = Pos.Bottom(logFrame); metricsFrame.Width = Dim.Fill();
     }
     help.Y = narrow ? Pos.Bottom(metricsFrame) : Pos.Bottom(statusFrame);
@@ -143,6 +145,8 @@ void RefreshProfileItems(string? selectName = null)
     try
     {
         profileItems.Clear();
+        var width = Math.Max(12, profileFrame.Viewport.Width > 0 ? profileFrame.Viewport.Width - 3 : 32);
+        profileHeader.Text = UiText.ProfileHeader(width);
         if (profiles.Count == 0) profileItems.Add("  No profiles yet — press n to create one");
         else
         {
@@ -155,9 +159,10 @@ void RefreshProfileItems(string? selectName = null)
                 var marker = UiText.ProfileGlyph(
                     isBroken: !File.Exists(AppConfig.Expand(p.Model)) || summary?.LastExitCode is not null and not 0,
                     isRunning: p.Name.Equals(runningProfile, StringComparison.OrdinalIgnoreCase) && runner.State == RunnerState.Running);
-                rows.Add(new UiText.ProfileRowData(marker, p.Vision, p.Name, p.Tags, CompactModelSize(p.Model)));
+                var modelSize = CompactModelSize(p.Model);
+                var mmSize = p.Vision ? CompactProjectorSizes(p.Mmproj) : "";
+                rows.Add(new UiText.ProfileRowData(marker, p.Vision, p.Name, p.Tags, modelSize, mmSize));
             }
-            var width = Math.Max(12, profileFrame.Viewport.Width > 0 ? profileFrame.Viewport.Width - 3 : 32);
             var favoriteCount = profiles.Count(p => p.Favorite);
             foreach (var (line, index) in UiText.ProfileRows(rows, width).Select((line, index) => (line, index)))
             {
@@ -855,7 +860,7 @@ runner.LineReceived += line => app.Invoke(() =>
     if (logLines.Count > 500) logLines.RemoveAt(0);
     RefreshLogs(); UpdateStatus();
 });
-runner.StateChanged += _ => app.Invoke(() => { RefreshProfileItems(runningProfile); RefreshLogs(); UpdateStatus(); });
+runner.StateChanged += _ => app.Invoke(() => { ApplyLayout(); RefreshProfileItems(runningProfile); RefreshLogs(); UpdateStatus(); });
 runner.Exited += exit => app.Invoke(() =>
 {
     var name = runningProfile; runningProfile = "";
@@ -1271,6 +1276,36 @@ static string CompactModelSize(string path)
                .Replace(" GiB", "G", StringComparison.Ordinal)
                .Replace(" TiB", "T", StringComparison.Ordinal)
                .Replace(" B", "B", StringComparison.Ordinal);
+}
+static string CompactProjectorSizes(string path)
+{
+    try
+    {
+        var fullPath = Path.GetFullPath(AppConfig.Expand(path));
+        var selected = ModelSize(fullPath);
+        if (string.IsNullOrEmpty(selected)) return "";
+
+        var siblings = Directory.EnumerateFiles(Path.GetDirectoryName(fullPath) ?? "")
+            .Where(candidate => Path.GetFileName(candidate).StartsWith("mmproj", StringComparison.OrdinalIgnoreCase)
+                && Path.GetExtension(candidate).Equals(".gguf", StringComparison.OrdinalIgnoreCase)
+                && !Path.GetFullPath(candidate).Equals(fullPath, StringComparison.OrdinalIgnoreCase))
+            .Select(ModelSize)
+            .Where(size => !string.IsNullOrEmpty(size))
+            .ToList();
+
+        var result = CompactSize(selected);
+        if (siblings.Count > 0) result += $" +{string.Join('/', siblings.Select(CompactSize))}";
+        return result;
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+    {
+        return "";
+    }
+
+    static string CompactSize(string size) => size.Replace(" KiB", "K", StringComparison.Ordinal)
+        .Replace(" MiB", "M", StringComparison.Ordinal)
+        .Replace(" GiB", "G", StringComparison.Ordinal)
+        .Replace(" TiB", "T", StringComparison.Ordinal);
 }
 static string ModelSize(string path)
 {
