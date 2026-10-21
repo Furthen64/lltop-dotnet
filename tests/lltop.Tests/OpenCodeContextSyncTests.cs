@@ -121,14 +121,89 @@ public sealed class OpenCodeContextSyncTests : IDisposable
     }
 
     [Fact]
-    public async Task UnavailableSlotsEndpointFailsAfterConfiguredShortTimeout()
+    public async Task DelayedStartupTreatsHealth503AsPendingAndRequestsSlotsOnlyAfterReady()
     {
-        var client = new HttpClient(new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable))));
-        var sync = new OpenCodeContextSync(client, TimeSpan.FromMilliseconds(20), TimeSpan.FromMilliseconds(1));
+        var requests = new List<string>();
+        var healthRequests = 0;
+        var client = new HttpClient(new StubHandler((request, _) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            requests.Add(path);
+            if (path == "/health")
+            {
+                healthRequests++;
+                var status = healthRequests < 3 ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK;
+                return Task.FromResult(new HttpResponseMessage(status));
+            }
+            return Task.FromResult(SlotsResponse("45056"));
+        }));
+        var sync = new OpenCodeContextSync(client, TimeSpan.FromSeconds(2), TimeSpan.FromMilliseconds(1));
 
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => sync.WaitForEffectiveContextAsync(8080, CancellationToken.None));
+        var context = await sync.WaitForEffectiveContextAsync(8080, CancellationToken.None);
 
-        Assert.Contains("/slots returned 503", error.Message);
+        Assert.Equal(45_056, context);
+        Assert.Equal(["/health", "/health", "/health", "/slots"], requests);
+    }
+
+    [Fact]
+    public async Task SuccessfulHealthReadinessQueriesSlotsOnceAndValidatesContext()
+    {
+        var requests = new List<string>();
+        var client = new HttpClient(new StubHandler((request, _) =>
+        {
+            requests.Add(request.RequestUri!.AbsolutePath);
+            return Task.FromResult(request.RequestUri.AbsolutePath == "/health"
+                ? new HttpResponseMessage(HttpStatusCode.OK)
+                : SlotsResponse("192000"));
+        }));
+        var sync = new OpenCodeContextSync(client, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(1));
+
+        var context = await sync.WaitForEffectiveContextAsync(9000, CancellationToken.None);
+
+        Assert.Equal(192_000, context);
+        Assert.Equal(["/health", "/slots"], requests);
+    }
+
+    [Fact]
+    public async Task ReadinessTimeoutDoesNotQuerySlots()
+    {
+        var healthRequests = 0;
+        var slotsRequests = 0;
+        var client = new HttpClient(new StubHandler((request, _) =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/health") healthRequests++;
+            else slotsRequests++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        }));
+        var sync = new OpenCodeContextSync(client, TimeSpan.FromMilliseconds(35), TimeSpan.FromMilliseconds(5));
+
+        var error = await Assert.ThrowsAsync<TimeoutException>(() => sync.WaitForEffectiveContextAsync(8080, CancellationToken.None));
+
+        Assert.Contains("did not report readiness", error.Message);
+        Assert.True(healthRequests > 0);
+        Assert.Equal(0, slotsRequests);
+    }
+
+    [Fact]
+    public async Task CancellationStopsReadinessPollingWithoutQueryingSlots()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var healthSeen = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var slotsRequests = 0;
+        var client = new HttpClient(new StubHandler((request, _) =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/health") healthSeen.TrySetResult(true);
+            else slotsRequests++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        }));
+        var sync = new OpenCodeContextSync(client, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(5));
+        var pending = sync.WaitForEffectiveContextAsync(8080, cancellation.Token);
+
+        await healthSeen.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+        Assert.Equal(0, slotsRequests);
     }
 
     [Theory]
@@ -178,4 +253,9 @@ public sealed class OpenCodeContextSyncTests : IDisposable
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => response(request, cancellationToken);
     }
+
+    static HttpResponseMessage SlotsResponse(string context) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent($"[{{\"n_ctx\":{context}}}]", Encoding.UTF8, "application/json")
+    };
 }

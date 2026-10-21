@@ -37,13 +37,13 @@ internal sealed class OpenCodeContextSync(HttpClient? httpClient = null)
 {
     const string TargetProperty = "provider.66_local.models.qwen.limit.context";
     readonly HttpClient client = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-    readonly TimeSpan discoveryTimeout = TimeSpan.FromSeconds(45);
-    readonly TimeSpan retryDelay = TimeSpan.FromMilliseconds(750);
+    readonly TimeSpan readinessTimeout = TimeSpan.FromSeconds(180);
+    readonly TimeSpan pollInterval = TimeSpan.FromSeconds(1);
 
-    public OpenCodeContextSync(HttpClient? httpClient, TimeSpan discoveryTimeout, TimeSpan retryDelay) : this(httpClient)
+    public OpenCodeContextSync(HttpClient? httpClient, TimeSpan readinessTimeout, TimeSpan pollInterval) : this(httpClient)
     {
-        this.discoveryTimeout = discoveryTimeout;
-        this.retryDelay = retryDelay;
+        this.readinessTimeout = readinessTimeout;
+        this.pollInterval = pollInterval;
     }
 
     public static string DefaultConfigPath => Path.Combine(
@@ -51,33 +51,42 @@ internal sealed class OpenCodeContextSync(HttpClient? httpClient = null)
 
     public async Task<long> WaitForEffectiveContextAsync(int port, CancellationToken cancellationToken)
     {
-        var endpoint = new UriBuilder(Uri.UriSchemeHttp, "127.0.0.1", port, "slots").Uri;
-        var deadline = DateTimeOffset.UtcNow + discoveryTimeout;
-        string lastError = "llama-server did not become ready.";
+        var healthEndpoint = new UriBuilder(Uri.UriSchemeHttp, "127.0.0.1", port, "health").Uri;
+        var slotsEndpoint = new UriBuilder(Uri.UriSchemeHttp, "127.0.0.1", port, "slots").Uri;
+        var deadline = DateTimeOffset.UtcNow + readinessTimeout;
+        var ready = false;
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                using var response = await client.GetAsync(endpoint, cancellationToken);
-                if (response.StatusCode == HttpStatusCode.OK)
+                using var response = await client.GetAsync(healthEndpoint, cancellationToken);
+                if (response.IsSuccessStatusCode)
                 {
-                    var json = await response.Content.ReadAsByteArrayAsync(cancellationToken);
-                    return ParseSlotsContext(json);
+                    ready = true;
+                    break;
                 }
-                lastError = $"/slots returned {(int)response.StatusCode} {response.ReasonPhrase}.";
+                // llama-server uses 503 while loading the model. Treat it as a normal pending state.
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                lastError = "Timed out waiting for the local /slots endpoint.";
             }
-            catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidDataException or UriFormatException)
+            catch (HttpRequestException)
             {
-                lastError = ex.Message;
+                // A refused connection is also expected before the HTTP listener is ready.
             }
-            await Task.Delay(retryDelay, cancellationToken);
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            if (remaining > TimeSpan.Zero)
+                await Task.Delay(remaining < pollInterval ? remaining : pollInterval, cancellationToken);
         }
-        throw new InvalidOperationException($"Could not discover llama-server context: {lastError}");
+        if (!ready)
+            throw new TimeoutException($"llama-server did not report readiness at /health within {readinessTimeout.TotalSeconds:0} seconds.");
+
+        using var slotsResponse = await client.GetAsync(slotsEndpoint, cancellationToken);
+        if (!slotsResponse.IsSuccessStatusCode)
+            throw new InvalidOperationException($"llama-server was ready, but /slots returned {(int)slotsResponse.StatusCode} {slotsResponse.ReasonPhrase}.");
+        var slotsJson = await slotsResponse.Content.ReadAsByteArrayAsync(cancellationToken);
+        return ParseSlotsContext(slotsJson);
     }
 
     public static long ParseSlotsContext(ReadOnlyMemory<byte> json)

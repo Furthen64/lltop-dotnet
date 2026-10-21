@@ -58,6 +58,14 @@ var externalMonitor = new ExternalServerMonitor(cfg);
 var openCodeContextSync = new OpenCodeContextSync();
 var openCodeLaunchState = new OpenCodeContextLaunchState();
 CancellationTokenSource? openCodeSyncCancellation = null;
+runner.StateChanged += state =>
+{
+    if (state is RunnerState.Stopping or RunnerState.Stopped or RunnerState.Failed)
+    {
+        try { openCodeSyncCancellation?.Cancel(); }
+        catch (ObjectDisposedException) { }
+    }
+};
 ExternalServer? externalServer = null;
 var benchmarkActive = false;
 CancellationTokenSource? benchmarkCancellation = null;
