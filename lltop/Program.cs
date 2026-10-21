@@ -55,6 +55,9 @@ var showingResourceGraph = false;
 DateTimeOffset? logAutoScrollPausedAt = null;
 var expandedHelp = false;
 var externalMonitor = new ExternalServerMonitor(cfg);
+var openCodeContextSync = new OpenCodeContextSync();
+var openCodeLaunchState = new OpenCodeContextLaunchState();
+CancellationTokenSource? openCodeSyncCancellation = null;
 ExternalServer? externalServer = null;
 var benchmarkActive = false;
 CancellationTokenSource? benchmarkCancellation = null;
@@ -583,12 +586,17 @@ async Task Launch(bool restart = false)
         logLines.Clear(); RefreshLogs();
         lock (activeRunGate) { serverStats = new ServerStats(); activeProfile = profile.Copy(profile.Name); activeRunSamples.Clear(); }
         runningProfile = profile.Name;
+        openCodeSyncCancellation?.Cancel();
+        openCodeSyncCancellation?.Dispose();
+        openCodeSyncCancellation = null;
+        openCodeLaunchState.Invalidate();
         await runner.StartAsync(plan, profile, cfg);
         lock (activeRunGate) activeRunGraphData = RunGraphDataWriter.Create(cfg.RunsDir, profile, runner.StartedAt ?? DateTimeOffset.Now);
         RefreshProfileItems(profile.Name);
         UpdateStatus(plan.RemovedArguments.Count == 0
             ? $"Started successfully. Log: {runner.LogPath}  Graph data: {activeRunGraphData.Path}"
             : $"Started with compatibility filtering. Removed: {string.Join(", ", plan.RemovedArguments.Select(x => x.OptionName).Distinct(StringComparer.Ordinal))}. Graph data: {activeRunGraphData.Path}");
+        if (cfg.SyncOpenCodeContext) StartOpenCodeContextDiscovery(profile.Port, runner.ProcessId!.Value);
     }
     catch (Exception ex)
     {
@@ -596,9 +604,81 @@ async Task Launch(bool restart = false)
     }
 }
 
+void StartOpenCodeContextDiscovery(int port, int processId)
+{
+    var generation = openCodeLaunchState.BeginLaunch();
+    openCodeSyncCancellation = new CancellationTokenSource();
+    _ = DiscoverAndMaybeUpdateOpenCodeContextAsync(port, processId, generation, openCodeSyncCancellation.Token);
+}
+
+async Task DiscoverAndMaybeUpdateOpenCodeContextAsync(int port, int processId, int generation, CancellationToken cancellationToken)
+{
+    bool IsCurrent() => !closing && openCodeLaunchState.IsCurrent(generation)
+        && runner.State == RunnerState.Running && runner.ProcessId == processId;
+
+    try
+    {
+        var effectiveContext = await openCodeContextSync.WaitForEffectiveContextAsync(port, cancellationToken);
+        if (!IsCurrent()) return;
+        OpenCodeContextConfig config;
+        try { config = OpenCodeContextSync.ReadConfig(OpenCodeContextSync.DefaultConfigPath); }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            app.Invoke(() => { if (IsCurrent()) UpdateStatus($"OpenCode context sync skipped: {ex.Message}"); });
+            return;
+        }
+        if (!OpenCodeContextSync.NeedsUpdate(config.Context, effectiveContext)) return;
+        app.Invoke(() =>
+        {
+            if (!IsCurrent() || !openCodeLaunchState.TryClaimPrompt(generation)) return;
+            if (!ShowOpenCodeContextPrompt(app, config.Context, effectiveContext))
+            {
+                UpdateStatus("OpenCode context unchanged; update was declined.");
+                return;
+            }
+            try
+            {
+                var update = OpenCodeContextSync.ApplyDecision(config, effectiveContext, approved: true)!;
+                UpdateStatus($"OpenCode context updated to {effectiveContext:N0}; backup: {Path.GetFileName(update.BackupPath)}");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
+            {
+                UpdateStatus($"OpenCode context update failed: {ex.Message}");
+            }
+        });
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+    catch (Exception ex)
+    {
+        app.Invoke(() => { if (IsCurrent()) UpdateStatus($"OpenCode context discovery failed: {ex.Message}"); });
+    }
+}
+
+bool ShowOpenCodeContextPrompt(IApplication application, long configuredContext, long effectiveContext)
+{
+    var approved = false;
+    var dialog = new Dialog { Title = " Update OpenCode context? ", Width = 62, Height = 15 };
+    dialog.Add(
+        new Label { X = 2, Y = 1, Text = "Provider: 66_local/qwen" },
+        new Label { X = 2, Y = 3, Text = $"Current OpenCode:   {configuredContext:N0} tokens" },
+        new Label { X = 2, Y = 4, Text = $"Running llama.cpp: {effectiveContext:N0} tokens" },
+        new Label { X = 2, Y = 6, Text = "Only limit.context will be changed." },
+        new Label { X = 2, Y = 7, Text = "A backup will be created before updating." });
+    var keep = new Button { X = 4, Y = 10, Text = "Keep current", IsDefault = true };
+    var update = new Button { X = Pos.Right(keep) + 3, Y = 10, Text = "Update & Backup" };
+    keep.Accepting += (_, _) => application.RequestStop();
+    update.Accepting += (_, _) => { approved = true; application.RequestStop(); };
+    dialog.KeyDown += (_, key) => { if (key.KeyCode == KeyCode.Esc) { application.RequestStop(); key.Handled = true; } };
+    dialog.Add(keep, update);
+    application.Run(dialog);
+    return approved;
+}
+
 async Task Stop(bool force)
 {
     if (!runner.IsActive) { UpdateStatus("No managed server is running."); return; }
+    openCodeSyncCancellation?.Cancel();
+    openCodeLaunchState.Invalidate();
     UpdateStatus(force ? "Force-stopping the server…" : "Sending interrupt to llama-server…");
     if (force) await runner.KillAsync(); else await runner.StopAsync();
 }
@@ -840,6 +920,8 @@ async Task Quit()
     }
     closing = true;
     benchmarkCancellation?.Cancel();
+    openCodeSyncCancellation?.Cancel();
+    openCodeLaunchState.Invalidate();
     monitorCancellation.Cancel();
     await runner.StopAsync();
     app.RequestStop();

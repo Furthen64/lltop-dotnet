@@ -11,6 +11,7 @@ sealed class AppConfig
     public string Editor { get; set; } = Environment.GetEnvironmentVariable("EDITOR") ?? (OperatingSystem.IsWindows() ? "notepad" : "nano");
     public bool ConfirmRestart { get; set; } = true;
     public bool ConfirmRecentFailure { get; set; } = true;
+    public bool SyncOpenCodeContext { get; set; } = true;
     public int RecentFailureWindowSeconds { get; set; } = 120;
     public int StartupFailureSeconds { get; set; } = 20;
     public string DefaultHost { get; set; } = "0.0.0.0";
@@ -53,7 +54,7 @@ sealed class AppConfig
     public void Save()
     {
         Directory.CreateDirectory(Root);
-        var contents = $"llama_server = {Toml.Quote(LlamaServer)}\nmodels_dir = {Toml.Quote(ModelsDir)}\ndefault_profile = {Toml.Quote(DefaultProfile)}\nprofiles_dir = {Toml.Quote(ProfilesDir)}\nruns_dir = {Toml.Quote(RunsDir)}\nbenchmarks_dir = {Toml.Quote(BenchmarksDir)}\nlogs_dir = {Toml.Quote(LogsDir)}\ntheme = {Toml.Quote(Theme)}\neditor = {Toml.Quote(Editor)}\nconfirm_restart = {ConfirmRestart.ToString().ToLowerInvariant()}\nconfirm_recent_failure = {ConfirmRecentFailure.ToString().ToLowerInvariant()}\nrecent_failure_window_seconds = {RecentFailureWindowSeconds}\nstartup_failure_seconds = {StartupFailureSeconds}\ndefault_host = {Toml.Quote(DefaultHost)}\ndefault_port = {DefaultPort}\n";
+        var contents = $"llama_server = {Toml.Quote(LlamaServer)}\nmodels_dir = {Toml.Quote(ModelsDir)}\ndefault_profile = {Toml.Quote(DefaultProfile)}\nprofiles_dir = {Toml.Quote(ProfilesDir)}\nruns_dir = {Toml.Quote(RunsDir)}\nbenchmarks_dir = {Toml.Quote(BenchmarksDir)}\nlogs_dir = {Toml.Quote(LogsDir)}\ntheme = {Toml.Quote(Theme)}\neditor = {Toml.Quote(Editor)}\nconfirm_restart = {ConfirmRestart.ToString().ToLowerInvariant()}\nconfirm_recent_failure = {ConfirmRecentFailure.ToString().ToLowerInvariant()}\nsync_opencode_context = {SyncOpenCodeContext.ToString().ToLowerInvariant()}\nrecent_failure_window_seconds = {RecentFailureWindowSeconds}\nstartup_failure_seconds = {StartupFailureSeconds}\ndefault_host = {Toml.Quote(DefaultHost)}\ndefault_port = {DefaultPort}\n";
         var temp = ConfigPath + ".tmp";
         File.WriteAllText(temp, contents);
         File.Move(temp, ConfigPath, true);
