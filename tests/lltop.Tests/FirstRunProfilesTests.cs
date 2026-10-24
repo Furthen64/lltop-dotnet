@@ -108,6 +108,30 @@ public sealed class FirstRunProfilesTests : IDisposable
     }
 
     [Fact]
+    public void CreateForModel_FindsUniqueSiblingJinjaTemplateWhenBasenameDiffers()
+    {
+        Write("DeepSeek-R1-Distill-Qwen-32B-Q4_1.gguf");
+        Write("llama-cpp-deepseek-r1.jinja", "template");
+
+        var profile = FirstRunProfiles.CreateForModel(Config(), "deepseek", Path.Combine(root, "DeepSeek-R1-Distill-Qwen-32B-Q4_1.gguf"));
+
+        Assert.Equal("auto", profile.ChatTemplateMode);
+        Assert.Equal(Path.Combine(root, "llama-cpp-deepseek-r1.jinja"), profile.DiscoveredChatTemplateFile);
+        Assert.Empty(profile.ChatTemplate);
+    }
+
+    [Fact]
+    public void CreateForModel_UsesUniqueJinjaFallbackButIgnoresAmbiguousTemplates()
+    {
+        Write("model.gguf");
+        Write("only.jinja", "template");
+        Assert.Equal(Path.Combine(root, "only.jinja"), FirstRunProfiles.CreateForModel(Config(), "one", Path.Combine(root, "model.gguf")).DiscoveredChatTemplateFile);
+
+        Write("second.jinja", "template");
+        Assert.Empty(FirstRunProfiles.CreateForModel(Config(), "two", Path.Combine(root, "model.gguf")).DiscoveredChatTemplateFile);
+    }
+
+    [Fact]
     public void Generate_CreatesUniqueProfilesWithoutAnEmptyStarter()
     {
         var cfg = Config();
@@ -146,6 +170,27 @@ public sealed class FirstRunProfilesTests : IDisposable
         Assert.Equal(2, loaded.Profiles.Count);
         Assert.Contains(loaded.Profiles, profile => profile.Name == "qwen3" && profile.ChatTemplate == "");
         Assert.Contains(loaded.Profiles, profile => profile.Name == "deepseek-v3" && profile.ChatTemplate == "");
+    }
+
+    [Fact]
+    public void ScanAndGenerate_DoesNotChangeExistingProfileTemplateSettings()
+    {
+        var cfg = Config();
+        Write("DeepSeek-R1.gguf");
+        Write("tools.jinja", "template");
+        FirstRunProfiles.ScanAndGenerate(cfg);
+        var store = new ProfileStore(cfg.ProfilesDir);
+        var profile = Assert.Single(store.LoadAll().Profiles);
+        profile.ChatTemplateMode = "embedded";
+        profile.DiscoveredChatTemplateFile = "/user/selected/path.jinja";
+        store.Save(profile);
+
+        Write("later.jinja", "another template");
+        Assert.Equal(0, FirstRunProfiles.ScanAndGenerate(cfg).ProfilesCreated);
+        var rescanned = Assert.Single(store.LoadAll().Profiles);
+
+        Assert.Equal("embedded", rescanned.ChatTemplateMode);
+        Assert.Equal("/user/selected/path.jinja", rescanned.DiscoveredChatTemplateFile);
     }
 
     [Fact]

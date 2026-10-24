@@ -41,7 +41,11 @@ sealed class Profile
     public bool Jinja { get; set; } = true;
     public bool Metrics { get; set; } = true;
     public bool NoMmap { get; set; } = true;
+    // Empty mode is reserved for older profiles that used ChatTemplate directly.
+    public string ChatTemplateMode { get; set; } = "";
     public string ChatTemplate { get; set; } = "";
+    public string ChatTemplateFile { get; set; } = "";
+    public string DiscoveredChatTemplateFile { get; set; } = "";
     public string Reasoning { get; set; } = "auto";
     public int ReasoningBudget { get; set; } = DefaultReasoningBudget;
     public string ReasoningEffort { get; set; } = "";
@@ -105,7 +109,9 @@ sealed class Profile
         PresencePenalty = PresencePenalty, FrequencyPenalty = FrequencyPenalty,
         Batch = Batch, UBatch = UBatch, Parallel = Parallel, CtxCheckpoints = CtxCheckpoints, Threads = Threads,
         FlashAttn = FlashAttn, Jinja = Jinja, Metrics = Metrics, NoMmap = NoMmap,
-        ChatTemplate = ChatTemplate, Reasoning = Reasoning, ReasoningBudget = ReasoningBudget, ReasoningEffort = ReasoningEffort,
+        ChatTemplateMode = ChatTemplateMode, ChatTemplate = ChatTemplate, ChatTemplateFile = ChatTemplateFile,
+        DiscoveredChatTemplateFile = DiscoveredChatTemplateFile,
+        Reasoning = Reasoning, ReasoningBudget = ReasoningBudget, ReasoningEffort = ReasoningEffort,
         Mtp = Mtp, MtpDraftTokens = MtpDraftTokens,
         ExtraArgs = [.. ExtraArgs], SourcePath = SourcePath
     };
@@ -124,6 +130,10 @@ sealed class Profile
         if (!new[] { "", "default", "minimal", "low", "medium", "high", "xhigh", "max" }.Contains(ReasoningEffort, StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException("Effort must be blank, default, minimal, low, medium, high, xhigh, or max; model support varies.");
         if (Mtp && MtpDraftTokens < 1) throw new InvalidOperationException("MTP draft tokens must be at least 1 when MTP is on.");
+        if (!new[] { "", "auto", "embedded", "custom", "legacy" }.Contains(ChatTemplateMode, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Template mode must be Auto, Embedded, or Custom.");
+        if (ChatTemplateMode.Equals("custom", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(ChatTemplateFile))
+            throw new InvalidOperationException("Custom template mode requires a Jinja file path.");
         if (RepeatPenalty < 0) throw new InvalidOperationException("Repeat penalty cannot be negative.");
         if (RepeatLastN < -1) throw new InvalidOperationException("Repeat last N must be -1 or greater.");
         if (ImageMinTokens < 0) throw new InvalidOperationException("Image minimum tokens cannot be negative.");
@@ -143,6 +153,8 @@ sealed class Profile
         if (string.IsNullOrWhiteSpace(Model)) throw new InvalidOperationException("Model path is required.");
         if (!File.Exists(Model)) throw new FileNotFoundException("Model was not found.", Model);
         if (Vision && !File.Exists(Mmproj)) throw new FileNotFoundException("Vision projector was not found.", Mmproj);
+        if (ChatTemplateMode.Equals("custom", StringComparison.OrdinalIgnoreCase) && !File.Exists(AppConfig.Expand(ChatTemplateFile)))
+            throw new FileNotFoundException("Custom chat template was not found.", ChatTemplateFile);
         if (Ctx <= 0 || Batch <= 0 || UBatch <= 0 || Parallel <= 0)
             throw new InvalidOperationException("Context, batch, micro-batch, and parallel values must be greater than zero.");
         if (CtxCheckpoints <= 0) throw new InvalidOperationException("Context checkpoints must be greater than zero.");
@@ -171,6 +183,8 @@ sealed class ProfileStore(string directory)
                 profile.Model = AppConfig.Expand(profile.Model);
                 profile.Mmproj = AppConfig.Expand(profile.Mmproj);
                 profile.LlamaServer = AppConfig.Expand(profile.LlamaServer);
+                profile.ChatTemplateFile = AppConfig.Expand(profile.ChatTemplateFile);
+                profile.DiscoveredChatTemplateFile = AppConfig.Expand(profile.DiscoveredChatTemplateFile);
                 profile.SourcePath = path;
                 profile.Validate();
                 profiles.Add(profile);
@@ -239,7 +253,9 @@ sealed class ProfileStore(string directory)
         D("presence_penalty", p.PresencePenalty); D("frequency_penalty", p.FrequencyPenalty);
         I("batch", p.Batch); I("ubatch", p.UBatch); I("parallel", p.Parallel); I("ctx_checkpoints", p.CtxCheckpoints); I("threads", p.Threads);
         S("flash_attn", p.FlashAttn); B("jinja", p.Jinja); B("metrics", p.Metrics); B("no_mmap", p.NoMmap);
-        S("chat_template", p.ChatTemplate); S("reasoning", p.Reasoning); I("reasoning_budget", p.ReasoningBudget);
+        S("chat_template_mode", p.ChatTemplateMode); S("chat_template", p.ChatTemplate);
+        S("chat_template_file", p.ChatTemplateFile); S("discovered_chat_template_file", p.DiscoveredChatTemplateFile);
+        S("reasoning", p.Reasoning); I("reasoning_budget", p.ReasoningBudget);
         S("reasoning_effort", p.ReasoningEffort);
         B("mtp", p.Mtp); I("mtp_draft_tokens", p.MtpDraftTokens);
         b.Append("extra_args = [").Append(string.Join(", ", p.ExtraArgs.Select(Toml.Quote))).AppendLine("]");

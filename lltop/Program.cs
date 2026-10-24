@@ -1163,7 +1163,7 @@ static bool EditProfile(IApplication app, Profile profile, string title)
 
     var tabs = new Tabs { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(3) };
     var general = new View { Title = " General ", ViewportSettings = ViewportSettingsFlags.HasScrollBars };
-    general.SetContentSize(new System.Drawing.Size(100, 27));
+    general.SetContentSize(new System.Drawing.Size(100, 34));
     var reasoningPage = new View { Title = " Reasoning ", ViewportSettings = ViewportSettingsFlags.HasScrollBars };
     reasoningPage.SetContentSize(new System.Drawing.Size(100, 34));
     var flash = new View { Title = " Flash-attn " };
@@ -1179,7 +1179,10 @@ static bool EditProfile(IApplication app, Profile profile, string title)
     Field(general, "alias", "Alias", profile.Alias, 50, 7, 30);
     Field(general, "host", "Host", profile.Host, 2, 9, 16); Field(general, "port", "Port", profile.Port.ToString(), 29, 9, 6);
     Field(general, "ctx", "Context", profile.Ctx.ToString(), 46, 9, 8); Field(general, "ngl", "GPU layers", profile.Ngl.ToString(), 67, 9, 5);
-    Field(general, "template", "Template", profile.ChatTemplate, 2, 11, 25);
+    Field(general, "templateMode", "Mode auto/embedded/custom", string.IsNullOrWhiteSpace(profile.ChatTemplateMode)
+        ? (string.IsNullOrWhiteSpace(profile.ChatTemplate) ? "auto" : "legacy") : profile.ChatTemplateMode, 2, 27, 15);
+    Field(general, "templateFile", "Custom Jinja file", profile.ChatTemplateFile, 2, 29, 72);
+    general.Add(new Label { X = 2, Y = 31, Text = $"Auto discovery: {(string.IsNullOrWhiteSpace(profile.DiscoveredChatTemplateFile) ? "use embedded GGUF template" : profile.DiscoveredChatTemplateFile)}" });
     Field(general, "temp", "Temperature", profile.Temp.ToString(CultureInfo.InvariantCulture), 2, 13, 7); Field(general, "topP", "Top-P", profile.TopP.ToString(CultureInfo.InvariantCulture), 25, 13, 7); Field(general, "topK", "Top-K", profile.TopK.ToString(), 43, 13, 7); Field(general, "minP", "Min-P", profile.MinP.ToString(CultureInfo.InvariantCulture), 61, 13, 7);
     Field(general, "repeatPenalty", "Repeat penalty", profile.RepeatPenalty.ToString(CultureInfo.InvariantCulture), 2, 15, 7); Field(general, "repeatLastN", "Repeat last N", profile.RepeatLastN.ToString(), 30, 15, 7); Field(general, "presence", "Presence", profile.PresencePenalty.ToString(CultureInfo.InvariantCulture), 54, 15, 7); Field(general, "frequency", "Frequency", profile.FrequencyPenalty.ToString(CultureInfo.InvariantCulture), 74, 15, 7);
     var mmproj = Field(general, "mmproj", "Vision projector", profile.Mmproj, 2, 17, 65);
@@ -1331,7 +1334,9 @@ static bool EditProfile(IApplication app, Profile profile, string title)
         try
         {
             profile.Name = name.Text.Trim(); profile.Description = T("description").Trim(); profile.Model = AppConfig.Expand(T("model")); profile.LlamaServer = AppConfig.Expand(T("server")); profile.Alias = T("alias").Trim(); profile.Host = T("host").Trim(); profile.Port = ParseInt(T("port"), "Port"); profile.Timeout = ParseInt(T("timeout"), "Server timeout"); profile.Verbosity = ParseInt(T("verbosity"), "Verbosity");
-            profile.Ctx = ParseInt(T("ctx"), "Context"); profile.Ngl = ParseInt(T("ngl"), "GPU layers"); profile.ChatTemplate = T("template").Trim(); profile.Reasoning = T("reasoning").Trim().ToLowerInvariant(); profile.ReasoningBudget = ParseInt(T("budget"), "Reasoning budget");
+            profile.Ctx = ParseInt(T("ctx"), "Context"); profile.Ngl = ParseInt(T("ngl"), "GPU layers");
+            profile.ChatTemplateMode = T("templateMode").Trim().ToLowerInvariant(); profile.ChatTemplateFile = AppConfig.Expand(T("templateFile").Trim());
+            profile.Reasoning = T("reasoning").Trim().ToLowerInvariant(); profile.ReasoningBudget = ParseInt(T("budget"), "Reasoning budget");
             profile.ReasoningEffort = T("effort").Trim().ToLowerInvariant();
             profile.Temp = ParseDouble(T("temp"), "Temperature"); profile.TopP = ParseDouble(T("topP"), "Top P"); profile.TopK = ParseInt(T("topK"), "Top K"); profile.MinP = ParseDouble(T("minP"), "Min P"); profile.RepeatPenalty = ParseDouble(T("repeatPenalty"), "Repeat penalty"); profile.RepeatLastN = ParseInt(T("repeatLastN"), "Repeat last N"); profile.PresencePenalty = ParseDouble(T("presence"), "Presence penalty"); profile.FrequencyPenalty = ParseDouble(T("frequency"), "Frequency penalty");
             profile.Vision = vision.Value == CheckState.Checked; profile.Mmproj = AppConfig.Expand(T("mmproj")); profile.ImageMinTokens = ParseInt(T("imageTokens"), "Image minimum tokens");

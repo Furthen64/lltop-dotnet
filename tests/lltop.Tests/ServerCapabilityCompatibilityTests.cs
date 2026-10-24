@@ -31,6 +31,7 @@ public sealed class ServerCapabilityCompatibilityTests : IDisposable
           --metrics                      enable metrics
           --no-mmap                      disable mmap
           --chat-template TEMPLATE       force chat template
+          --chat-template-file FILE      force chat template file
           --device DEVICE                pick device
           --tensor-split SPLIT           tensor split
         """;
@@ -64,6 +65,7 @@ public sealed class ServerCapabilityCompatibilityTests : IDisposable
           --jinja                        enable jinja
           --no-mmap                      disable mmap
           --chat-template TEMPLATE       force chat template
+          --chat-template-file FILE      force chat template file
           --reasoning MODE               reasoning mode
           --reasoning-budget N           reasoning budget
           --device DEVICE                pick device
@@ -263,6 +265,41 @@ public sealed class ServerCapabilityCompatibilityTests : IDisposable
         Assert.Equal(512, profile.Batch);
         Assert.Equal(256, profile.UBatch);
         Assert.Equal("auto", profile.Reasoning);
+    }
+
+    [Fact]
+    public void LaunchPlan_KeepsCustomJinjaFileAndJinjaFlagForSupportedLlamaServer()
+    {
+        var capability = Capability(ModernVersion, ModernHelp);
+        var template = Path.GetFullPath("/models/llama-cpp-deepseek-r1.jinja");
+        var profile = new Profile
+        {
+            Name = "deepseek", Model = "/models/DeepSeek-R1-Distill-Qwen-32B-Q4_1.gguf",
+            ChatTemplateMode = "auto", DiscoveredChatTemplateFile = template, Jinja = false
+        };
+
+        var plan = ServerRunner.BuildLaunchPlan("/llama-server", profile, capability);
+        var args = plan.FilteredArguments.ToList();
+
+        Assert.Contains("--chat-template-file", args);
+        Assert.Equal(template, args[args.IndexOf("--chat-template-file") + 1]);
+        Assert.Contains("--jinja", args);
+        Assert.DoesNotContain("--chat-template", args);
+    }
+
+    [Fact]
+    public void LaunchPlan_RejectsJinjaFileWhenServerLacksJinjaSupport()
+    {
+        var profile = new Profile
+        {
+            Name = "deepseek", Model = "/models/deepseek.gguf", ChatTemplateMode = "auto",
+            DiscoveredChatTemplateFile = "/models/tool-use.jinja"
+        };
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            ServerRunner.BuildLaunchPlan("/llama-server", profile, Capability(LegacyVersion, LegacyHelp)));
+
+        Assert.Contains("cannot apply a Jinja template file", error.Message);
     }
 
     [Fact]

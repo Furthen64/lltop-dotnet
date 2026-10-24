@@ -3,6 +3,58 @@ using Xunit;
 public sealed class ServerRunnerTests
 {
     [Fact]
+    public void BuildArguments_AutoTemplateFileEnablesJinjaAndSuppressesManualTemplateOverrides()
+    {
+        var template = Path.Combine(Path.GetTempPath(), "llama-cpp-deepseek-r1.jinja");
+        var args = ServerRunner.BuildArguments(new Profile
+        {
+            Model = "/models/DeepSeek-R1-Distill-Qwen-32B-Q4_1.gguf",
+            ChatTemplateMode = "auto",
+            DiscoveredChatTemplateFile = template,
+            Jinja = false,
+            ChatTemplate = "deepseek",
+            ExtraArgs = ["--chat-template", "chatml", "--chat-template-file=/wrong.jinja", "--no-jinja", "--threads-http", "4"]
+        }).ToList();
+
+        Assert.Equal(1, args.Count(x => x == "--chat-template-file"));
+        Assert.Equal(Path.GetFullPath(template), args[args.IndexOf("--chat-template-file") + 1]);
+        Assert.Contains("--jinja", args);
+        Assert.DoesNotContain("--chat-template", args);
+        Assert.DoesNotContain("chatml", args);
+        Assert.DoesNotContain("--no-jinja", args);
+        Assert.Contains("--threads-http", args);
+    }
+
+    [Fact]
+    public void BuildArguments_EmbeddedTemplateDoesNotPassAnyTemplateOverride()
+    {
+        var args = ServerRunner.BuildArguments(new Profile
+        {
+            Model = "/models/test.gguf", ChatTemplateMode = "embedded", ChatTemplate = "deepseek3",
+            DiscoveredChatTemplateFile = "/models/custom.jinja", ExtraArgs = ["--chat-template", "chatml"]
+        }).ToList();
+
+        Assert.DoesNotContain("--chat-template", args);
+        Assert.DoesNotContain("--chat-template-file", args);
+        Assert.DoesNotContain("chatml", args);
+    }
+
+    [Fact]
+    public void BuildArguments_CustomTemplateUsesExplicitFileAndForcesJinja()
+    {
+        var args = ServerRunner.BuildArguments(new Profile
+        {
+            Model = "/models/test.gguf", ChatTemplateMode = "custom", ChatTemplateFile = "templates/tool-use.jinja",
+            Jinja = false
+        }).ToList();
+
+        Assert.Equal(1, args.Count(x => x == "--chat-template-file"));
+        Assert.Equal(Path.GetFullPath("templates/tool-use.jinja"), args[args.IndexOf("--chat-template-file") + 1]);
+        Assert.Contains("--jinja", args);
+        Assert.DoesNotContain("--chat-template", args);
+    }
+
+    [Fact]
     public void BuildArguments_PreservesValuesAndFiltersConflictingFlashAttn()
     {
         var profile = new Profile

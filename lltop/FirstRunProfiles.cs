@@ -143,6 +143,8 @@ static class FirstRunProfiles
         var profile = Profile.CreateDefault(cfg, name);
         profile.Model = Path.GetFullPath(modelPath);
         profile.Description = "Auto-generated from model discovery";
+        profile.ChatTemplateMode = "auto";
+        profile.DiscoveredChatTemplateFile = FindSiblingJinjaTemplate(profile.Model);
 
         var modelName = Path.GetFileNameWithoutExtension(modelPath);
         if (modelName.Contains("deepseek", StringComparison.OrdinalIgnoreCase)) ApplyDeepSeek(profile);
@@ -153,6 +155,23 @@ static class FirstRunProfiles
         ApplyCapabilityDefaults(profile, capabilities);
 
         return profile;
+    }
+
+    internal static string FindSiblingJinjaTemplate(string modelPath)
+    {
+        var directory = Path.GetDirectoryName(Path.GetFullPath(modelPath));
+        if (directory is null || !Directory.Exists(directory)) return "";
+
+        var files = Directory.EnumerateFiles(directory, "*.jinja")
+            .Select(Path.GetFullPath)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var basename = Path.GetFileNameWithoutExtension(modelPath);
+        var matching = files.Where(path => Path.GetFileNameWithoutExtension(path)
+            .Equals(basename, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (matching.Count == 1) return matching[0];
+        if (matching.Count > 1) return "";
+        return files.Count == 1 ? files[0] : "";
     }
 
     public static bool RemoveLegacyStarter(AppConfig cfg)

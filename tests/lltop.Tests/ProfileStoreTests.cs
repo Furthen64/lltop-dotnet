@@ -15,7 +15,8 @@ public sealed class ProfileStoreTests : IDisposable
             Vision = true, Mmproj = "/models/mmproj-BF16.gguf",
             RepeatPenalty = 1.15, RepeatLastN = 128, PresencePenalty = .2, FrequencyPenalty = .3,
             ReasoningBudget = 2048, Timeout = 7200, Verbosity = 2, Mtp = true, MtpDraftTokens = 3, ImageMinTokens = 1024, ExtraArgs = ["--verbose", "--log-colors", "value with spaces"],
-            Tags = ["fast", "coding model"], Favorite = true
+            Tags = ["fast", "coding model"], Favorite = true,
+            ChatTemplateMode = "auto", ChatTemplateFile = "/templates/custom.jinja", DiscoveredChatTemplateFile = "/models/llama-cpp-deepseek-r1.jinja"
         };
 
         store.Save(original);
@@ -45,6 +46,9 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.Equal(original.ExtraArgs, loaded.ExtraArgs);
         Assert.Equal(["fast", "coding model"], loaded.Tags);
         Assert.True(loaded.Favorite);
+        Assert.Equal("auto", loaded.ChatTemplateMode);
+        Assert.Equal(original.ChatTemplateFile, loaded.ChatTemplateFile);
+        Assert.Equal(original.DiscoveredChatTemplateFile, loaded.DiscoveredChatTemplateFile);
     }
 
     [Fact]

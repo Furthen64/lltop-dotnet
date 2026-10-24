@@ -170,6 +170,9 @@ sealed class ServerRunner : IDisposable
             && !capabilities.SupportsOption("--reasoning-effort") && !capabilities.SupportsOption("--chat-template-kwargs"))
             throw new InvalidOperationException("This server cannot apply the selected reasoning effort. Update llama-server or select Default effort.");
         var segments = BuildArgumentSegments(profile, capabilities);
+        if (segments.Any(segment => segment.FirstToken == "--chat-template-file")
+            && (!capabilities.SupportsOption("--chat-template-file") || !capabilities.SupportsOption("--jinja")))
+            throw new InvalidOperationException("This server cannot apply a Jinja template file. Update llama-server or switch the template mode to Embedded.");
         var filteredSegments = FilterSegments(segments, capabilities, out var removed);
         return new LaunchPlan(
             executable,
@@ -181,7 +184,20 @@ sealed class ServerRunner : IDisposable
 
     static IReadOnlyList<LaunchArgumentSegment> BuildArgumentSegments(Profile p, ServerCapabilityRecord capabilities)
     {
-        var extraArgs = p.ExtraArgs.ToList();
+        var templateMode = p.ChatTemplateMode.Trim().ToLowerInvariant();
+        var templateFile = templateMode switch
+        {
+            "auto" => p.DiscoveredChatTemplateFile,
+            "custom" => p.ChatTemplateFile,
+            "embedded" => "",
+            _ => "" // Empty mode preserves the legacy --chat-template field.
+        };
+        templateFile = string.IsNullOrWhiteSpace(templateFile)
+            ? ""
+            : Path.GetFullPath(AppConfig.Expand(templateFile));
+        var suppressTemplateOverrides = templateMode is "auto" or "embedded" or "custom"
+            || !string.IsNullOrWhiteSpace(p.ChatTemplate);
+        var extraArgs = FilterTemplateOverrides(p.ExtraArgs, suppressTemplateOverrides, templateFile.Length > 0).ToList();
         var effort = p.ReasoningEffort.Trim().ToLowerInvariant();
         string? templateKwargs = null;
         if (effort is not "" and not "default" && !capabilities.SupportsOption("--reasoning-effort")
@@ -245,7 +261,7 @@ sealed class ServerRunner : IDisposable
         segments.Add(new(["--ctx-checkpoints", p.CtxCheckpoints.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "context checkpoints"));
         if (p.Threads > 0) segments.Add(new(["--threads", p.Threads.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "threads"));
         Flag("--metrics", p.Metrics, "metrics");
-        Flag("--jinja", p.Jinja, "jinja");
+        Flag("--jinja", p.Jinja || templateFile.Length > 0, "jinja");
         Pair("--reasoning", p.Reasoning, "reasoning");
         if (templateKwargs is not null) Pair("--chat-template-kwargs", templateKwargs, "reasoning effort");
         else if (effort != "default") Pair("--reasoning-effort", effort, "reasoning effort");
@@ -256,9 +272,29 @@ sealed class ServerRunner : IDisposable
             segments.Add(new(["--spec-draft-n-max", p.MtpDraftTokens.ToString(CultureInfo.InvariantCulture)], LaunchArgumentOrigin.Generated, "MTP draft tokens"));
         }
         Flag("--no-mmap", p.NoMmap, "mmap");
-        Pair("--chat-template", p.ChatTemplate, "chat template");
+        if (templateFile.Length > 0)
+            Pair("--chat-template-file", templateFile, "chat template file");
+        else if (templateMode is "" or "legacy")
+            Pair("--chat-template", p.ChatTemplate, "chat template");
         segments.AddRange(ParseExtraArgumentSegments(FilterExtraArguments(extraArgs), capabilities));
         return segments;
+    }
+
+    static IEnumerable<string> FilterTemplateOverrides(IEnumerable<string> args, bool suppressTemplateOverrides, bool usingJinjaFile)
+    {
+        var tokens = args.ToList();
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            var arg = tokens[i];
+            var name = ExtractOptionName(arg);
+            if (suppressTemplateOverrides && name is "--chat-template" or "--chat-template-file")
+            {
+                if (!arg.Contains('=') && i + 1 < tokens.Count && !IsOptionToken(tokens[i + 1])) i++;
+                continue;
+            }
+            if (usingJinjaFile && name is "--no-jinja" or "--jinja") continue;
+            yield return arg;
+        }
     }
 
     static IEnumerable<string> FilterExtraArguments(List<string> args)
