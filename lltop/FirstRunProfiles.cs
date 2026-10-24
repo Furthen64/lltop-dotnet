@@ -145,7 +145,7 @@ static class FirstRunProfiles
         profile.Description = "Auto-generated from model discovery";
 
         var modelName = Path.GetFileNameWithoutExtension(modelPath);
-        if (modelName.Contains("deepseek", StringComparison.OrdinalIgnoreCase)) ApplyDeepSeek(profile, modelName);
+        if (modelName.Contains("deepseek", StringComparison.OrdinalIgnoreCase)) ApplyDeepSeek(profile);
         else if (IsGptOss(modelName)) ApplyGptOss(profile);
         else if (modelName.Contains("qwen", StringComparison.OrdinalIgnoreCase)) ApplyQwen(profile, modelName);
         else ApplyUnknown(profile);
@@ -221,7 +221,7 @@ static class FirstRunProfiles
         profile.Reasoning = "auto";
     }
 
-    static void ApplyDeepSeek(Profile profile, string modelName)
+    static void ApplyDeepSeek(Profile profile)
     {
         profile.Alias = "deepseek";
         profile.Ctx = 65536;
@@ -232,9 +232,9 @@ static class FirstRunProfiles
         profile.TopP = .95;
         profile.TopK = 20;
         profile.MinP = 0;
-        profile.ChatTemplate = modelName.Contains("v3", StringComparison.OrdinalIgnoreCase) ? "deepseek3"
-            : modelName.Contains("v2", StringComparison.OrdinalIgnoreCase) ? "deepseek2"
-            : "deepseek";
+        // Prefer the template embedded in this GGUF. DeepSeek's built-in named
+        // templates target older model formats and can misformat newer distills.
+        profile.ChatTemplate = "";
         profile.Reasoning = "auto";
     }
 

@@ -61,9 +61,9 @@ public sealed class FirstRunProfilesTests : IDisposable
     [InlineData("Qwen3-Coder-30B.gguf", "qwen", "", 65536)]
     [InlineData("gpt-oss-20b-Q4.gguf", "gpt-oss", "", 131072)]
     [InlineData("GPTOSS-120B.gguf", "gpt-oss", "", 131072)]
-    [InlineData("DeepSeek-R1-Distill-Qwen.gguf", "deepseek", "deepseek", 65536)]
-    [InlineData("DeepSeek-V2-Lite.gguf", "deepseek", "deepseek2", 65536)]
-    [InlineData("DeepSeek-V3-Q4.gguf", "deepseek", "deepseek3", 65536)]
+    [InlineData("DeepSeek-R1-Distill-Qwen.gguf", "deepseek", "", 65536)]
+    [InlineData("DeepSeek-V2-Lite.gguf", "deepseek", "", 65536)]
+    [InlineData("DeepSeek-V3-Q4.gguf", "deepseek", "", 65536)]
     public void CreateForModel_SelectsFamilyTemplate(string fileName, string alias, string chatTemplate, int context)
     {
         var profile = FirstRunProfiles.CreateForModel(Config(), "generated", Path.Combine(root, fileName));
@@ -145,7 +145,7 @@ public sealed class FirstRunProfilesTests : IDisposable
         Assert.Equal(1, refresh.ProfilesCreated);
         Assert.Equal(2, loaded.Profiles.Count);
         Assert.Contains(loaded.Profiles, profile => profile.Name == "qwen3" && profile.ChatTemplate == "");
-        Assert.Contains(loaded.Profiles, profile => profile.Name == "deepseek-v3" && profile.ChatTemplate == "deepseek3");
+        Assert.Contains(loaded.Profiles, profile => profile.Name == "deepseek-v3" && profile.ChatTemplate == "");
     }
 
     [Fact]
